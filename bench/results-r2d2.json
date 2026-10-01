@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "machine": "aarch64",
+    "python": "3.12.14",
+    "lunardyson": "0.1.0"
+  },
+  "rows": [
+    {
+      "scenario": "empty run",
+      "engine": "lunardyson (reused runtime)",
+      "median_us": 1021.4
+    },
+    {
+      "scenario": "empty run",
+      "engine": "lunardyson (fresh runtime)",
+      "median_us": 1266.2
+    },
+    {
+      "scenario": "empty run",
+      "engine": "lupa (fresh runtime)",
+      "median_us": 1069.0
+    },
+    {
+      "scenario": "empty run",
+      "engine": "ritesmith run_in_sandbox",
+      "median_us": 2123.8
+    },
+    {
+      "scenario": "1 tool call",
+      "engine": "lunardyson (reused runtime)",
+      "median_us": 1259.9
+    },
+    {
+      "scenario": "1 tool call",
+      "engine": "lunardyson (fresh runtime)",
+      "median_us": 1547.9
+    },
+    {
+      "scenario": "1 tool call",
+      "engine": "lupa (fresh runtime)",
+      "median_us": 1121.4
+    },
+    {
+      "scenario": "T3 order fulfillment (13 tool calls)",
+      "engine": "lunardyson (reused runtime)",
+      "median_us": 3267.2
+    },
+    {
+      "scenario": "T3 order fulfillment (13 tool calls)",
+      "engine": "lunardyson (fresh runtime)",
+      "median_us": 3606.2
+    },
+    {
+      "scenario": "T3 order fulfillment (13 tool calls)",
+      "engine": "lupa (fresh runtime)",
+      "median_us": 2504.6
+    },
+    {
+      "scenario": "CPU: 200k loop iterations",
+      "engine": "lunardyson (reused runtime)",
+      "median_us": 20851.3
+    },
+    {
+      "scenario": "CPU: 200k loop iterations",
+      "engine": "lunardyson (fresh runtime)",
+      "median_us": 20860.7
+    },
+    {
+      "scenario": "CPU: 200k loop iterations",
+      "engine": "lupa (fresh runtime)",
+      "median_us": 16504.3
+    },
+    {
+      "scenario": "CPU: 200k loop iterations",
+      "engine": "ritesmith run_in_sandbox",
+      "median_us": 18345.0
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  global: ld_*;
+  local: *;
+};

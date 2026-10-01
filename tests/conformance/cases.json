@@ -1,0 +1,191 @@
+{
+  "description": "Language-neutral conformance suite. Every binding must run each case and get the expected outcome. Tool behaviour is declarative: a tool returns `returns`, or a string of `returns_string_bytes` bytes.",
+  "cases": [
+    {
+      "name": "infinite_loop",
+      "limits": {"cpu_time_ms": 200},
+      "source": "function run() while true do end end",
+      "expect": {"error_kind": ["timeout"], "vm_time_ms_between": [180, 220]}
+    },
+    {
+      "name": "infinite_loop_inside_pcall",
+      "limits": {"cpu_time_ms": 200},
+      "source": "function run() while true do pcall(function() while true do end end) end end",
+      "expect": {"error_kind": ["timeout"]}
+    },
+    {
+      "name": "timeout_swallowed_by_pcall",
+      "limits": {"cpu_time_ms": 200},
+      "source": "function run() local ok = pcall(function() while true do end end) return { ok = ok } end",
+      "expect": {"error_kind": ["timeout"]}
+    },
+    {
+      "name": "memory_bomb_string_doubling",
+      "limits": {"memory_mb": 8},
+      "source": "function run() local s = 'x' for i = 1, 40 do s = s .. s end return { n = #s } end",
+      "expect": {"error_kind": ["memory"]}
+    },
+    {
+      "name": "memory_bomb_string_rep",
+      "limits": {"memory_mb": 8},
+      "source": "function run() return { n = #string.rep('x', 2^30) } end",
+      "expect": {"error_kind": ["memory"]}
+    },
+    {
+      "name": "memory_swallowed_by_pcall",
+      "limits": {"memory_mb": 8},
+      "source": "function run() local ok = pcall(function() return string.rep('x', 2^30) end) return { ok = ok } end",
+      "expect": {"error_kind": ["memory"]}
+    },
+    {
+      "name": "huge_table",
+      "limits": {"memory_mb": 8},
+      "source": "function run() local t = {} for i = 1, 1e8 do t[i] = i end return { n = #t } end",
+      "expect": {"error_kind": ["memory"]}
+    },
+    {
+      "name": "recursive_bomb",
+      "source": "local function f(n) return f(n + 1) + 1 end\nfunction run() return { v = f(1) } end",
+      "expect": {"error_kind": ["runtime", "memory"]}
+    },
+    {
+      "name": "coroutine_unavailable",
+      "source": "function run() local c = coroutine.create(function() end) return {} end",
+      "expect": {"error_kind": ["runtime"]}
+    },
+    {
+      "name": "builtin_mutation",
+      "source": "function run() string.upper = function() return 'pwned' end return {} end",
+      "expect": {"error_kind": ["runtime"]}
+    },
+    {
+      "name": "builtin_metatable_mutation",
+      "source": "function run() getmetatable('').__index = {} return {} end",
+      "expect": {"error_kind": ["runtime"]}
+    },
+    {
+      "name": "global_mutation_isolated_between_executions",
+      "source": "leaked_top = 42\nfunction run() leaked_run = 'yes' return {} end",
+      "expect": {"output_equals": {}},
+      "then": {
+        "source": "function run() return { top = leaked_top, run = leaked_run } end",
+        "expect": {"output_equals": {}}
+      }
+    },
+    {
+      "name": "tools_table_is_readonly",
+      "tools": [{"name": "crm.get", "returns": {"ok": true}}],
+      "source": "function run() tools.crm = {} return {} end",
+      "expect": {"error_kind": ["runtime"]}
+    },
+    {
+      "name": "tools_namespace_rawset_blocked",
+      "tools": [{"name": "crm.get", "returns": {"ok": true}}],
+      "source": "function run() rawset(tools.crm, 'delete', function() end) return {} end",
+      "expect": {"error_kind": ["runtime"]}
+    },
+    {
+      "name": "tools_metatable_locked",
+      "tools": [{"name": "crm.get", "returns": {"ok": true}}],
+      "source": "function run() return { mt = getmetatable(tools) } end",
+      "expect": {"output_equals": {"mt": "locked"}}
+    },
+    {
+      "name": "unauthorized_tool",
+      "tools": [{"name": "crm.get", "returns": {"ok": true}}],
+      "source": "function run() return tools.payment.refund({ amount = 10 }) end",
+      "expect": {"error_kind": ["unknown_tool"]}
+    },
+    {
+      "name": "unauthorized_function_in_known_namespace",
+      "tools": [{"name": "crm.get", "returns": {"ok": true}}],
+      "source": "function run() return tools.crm.delete({ id = 1 }) end",
+      "expect": {"error_kind": ["unknown_tool"]}
+    },
+    {
+      "name": "tool_call_bomb",
+      "tools": [{"name": "data.get", "max_calls": 3, "returns": {"ok": true}}],
+      "source": "function run() for i = 1, 100 do tools.data.get({ i = i }) end return {} end",
+      "expect": {"error_kind": ["tool_budget"], "tool_calls": 3}
+    },
+    {
+      "name": "tool_budget_swallowed_by_pcall",
+      "tools": [{"name": "data.get", "max_calls": 2, "returns": {"ok": true}}],
+      "source": "function run() for i = 1, 5 do pcall(tools.data.get, {}) end return { done = true } end",
+      "expect": {"error_kind": ["tool_budget"]}
+    },
+    {
+      "name": "effect_budget_money_forbidden",
+      "limits": {"max_effects": {"money": 0}},
+      "tools": [{"name": "pay.charge", "effect": "money", "returns": {"ok": true}}],
+      "source": "function run() return tools.pay.charge({ amount = 1 }) end",
+      "expect": {"error_kind": ["effect_budget"], "tool_calls": 0}
+    },
+    {
+      "name": "effect_budget_writes",
+      "limits": {"max_effects": {"write": 2}},
+      "tools": [{"name": "crm.update", "effect": "write", "returns": {"ok": true}}],
+      "source": "function run() for i = 1, 3 do tools.crm.update({ i = i }) end return {} end",
+      "expect": {"error_kind": ["effect_budget"], "tool_calls": 2}
+    },
+    {
+      "name": "huge_tool_response",
+      "tools": [{"name": "data.big", "max_response_bytes": 1000, "returns_string_bytes": 10000}],
+      "source": "function run() local r = tools.data.big({}) return { n = #r } end",
+      "expect": {"error_kind": ["tool_budget"]}
+    },
+    {
+      "name": "tool_yield_inside_pcall_works",
+      "tools": [{"name": "data.get", "returns": {"ok": true, "v": 7}}],
+      "source": "function run() local ok, r = pcall(tools.data.get, {}) return { ok = ok, v = r.v } end",
+      "expect": {"output_equals": {"ok": true, "v": 7}}
+    },
+    {
+      "name": "sandbox_escape_globals_absent",
+      "source": "function run() return { a = typeof(getfenv), b = typeof(setfenv), c = typeof(loadstring), d = typeof(load), e = typeof(require), f = typeof(os), g = typeof(debug), h = typeof(newproxy), i = typeof(collectgarbage), j = typeof(io), k = typeof(coroutine) } end",
+      "expect": {"output_equals": {"a": "nil", "b": "nil", "c": "nil", "d": "nil", "e": "nil", "f": "nil", "g": "nil", "h": "nil", "i": "nil", "j": "nil", "k": "nil"}}
+    },
+    {
+      "name": "print_is_a_noop",
+      "source": "function run() print('hello from the sandbox') return { ok = true } end",
+      "expect": {"output_equals": {"ok": true}}
+    },
+    {
+      "name": "contract_local_run",
+      "source": "local function run() return {} end",
+      "expect": {"error_kind": ["contract"]}
+    },
+    {
+      "name": "contract_non_table_result",
+      "source": "function run() return 42 end",
+      "expect": {"error_kind": ["contract"]}
+    },
+    {
+      "name": "contract_function_in_result",
+      "source": "function run() return { f = function() end } end",
+      "expect": {"error_kind": ["contract"]}
+    },
+    {
+      "name": "contract_cyclic_result",
+      "source": "function run() local t = {} t.self = t return t end",
+      "expect": {"error_kind": ["contract"]}
+    },
+    {
+      "name": "syntax_error",
+      "source": "function run( return {} end",
+      "expect": {"error_kind": ["syntax"]}
+    },
+    {
+      "name": "runtime_error_non_string",
+      "source": "function run() error({ code = 1 }) end",
+      "expect": {"error_kind": ["runtime"]}
+    },
+    {
+      "name": "input_and_context_roundtrip",
+      "input": {"n": 3, "tags": ["a", "b"], "nested": {"x": 1.5}},
+      "context": {"now": "2026-09-30T12:00:00Z"},
+      "source": "function run(input, context) return { n = input.n * 2, first = input.tags[1], x = input.nested.x, now = context.now } end",
+      "expect": {"output_equals": {"n": 6, "first": "a", "x": 1.5, "now": "2026-09-30T12:00:00Z"}}
+    }
+  ]
+}
