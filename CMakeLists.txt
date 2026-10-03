@@ -15,6 +15,15 @@ if(LD_SANITIZE)
     add_link_options(-fsanitize=address,undefined)
 endif()
 
+# ThreadSanitizer. The watchdog sets lua_Callbacks::interrupt from its own thread
+# while the VM reads it — a pattern Luau's lua.h explicitly sanctions. TSan can't
+# see the VM-side read is tolerant, so that one write is suppressed (tsan-suppressions.txt).
+option(LD_TSAN "Build with ThreadSanitizer" OFF)
+if(LD_TSAN)
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=thread)
+endif()
+
 # Luau upstream, pinned by the submodule (no fork).
 set(LUAU_BUILD_CLI OFF CACHE BOOL "" FORCE)
 set(LUAU_BUILD_TESTS OFF CACHE BOOL "" FORCE)

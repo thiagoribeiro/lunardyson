@@ -53,18 +53,26 @@ def test_replay_from_journal_is_deterministic():
         assert ex.result().output == first
 
 
-def test_interleaved_suspended_executions_on_one_runtime():
+def test_second_start_while_one_is_live_is_rejected():
+    """A runtime runs at most one execution at a time; concurrency is a pool of runtimes."""
     rt = crm_runtime()
-    a = rt.start(TWO_CALLS, {"first": "a1", "second": "a2"})
-    b = rt.start(TWO_CALLS, {"first": "b1", "second": "b2"})
-    b.resume({"name": "B1"})
-    a.resume({"name": "A1"})
-    a.resume({"name": "A2"})
-    b.resume({"name": "B2"})
-    assert a.result().output == {"names": ["A1", "A2"]}
-    assert b.result().output == {"names": ["B1", "B2"]}
+    a = rt.start(TWO_CALLS, {"first": "a1", "second": "a2"})  # live (suspended on a tool call)
+    with pytest.raises(ld.LunarDysonError):
+        rt.start(TWO_CALLS, {"first": "b1", "second": "b2"})
     a.close()
+    # Once the first execution is freed, the runtime accepts a new one.
+    b = rt.start(TWO_CALLS, {"first": "b1", "second": "b2"})
+    assert b.status == "pending_tool"
     b.close()
+
+
+def test_sequential_executions_each_get_the_full_memory_budget():
+    """Freeing an execution GCs the heap back to baseline, so the next gets the whole budget."""
+    source = "function run() local t = {} for i = 1, 4000 do t[i] = tostring(i) end return { n = #t } end"
+    rt = ld.Runtime(memory_mb=1)
+    for _ in range(50):
+        result = rt.execute(source)
+        assert result.ok, result.message
 
 
 def test_tool_exception_is_catchable_by_the_program():

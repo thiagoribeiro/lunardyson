@@ -56,7 +56,8 @@ typedef enum {
 } ld_effect;
 
 typedef struct {
-    size_t memory_limit_bytes;             /* heap above the runtime's baseline */
+    size_t memory_limit_bytes;             /* heap ceiling above the sealed baseline, for the single
+                                              in-flight execution (one execution per runtime) */
     uint32_t cpu_time_ms;                  /* VM time per execution; tool time is not counted */
     uint32_t max_effects[LD_EFFECT_COUNT]; /* calls per effect class per execution; LD_UNLIMITED */
 } ld_limits;
@@ -85,7 +86,9 @@ LD_API int ld_tool_register(ld_runtime* rt, const char* name, const char* luau_s
                             uint32_t max_calls, size_t max_response_bytes); /* 0 on success */
 LD_API int ld_declare_types(ld_runtime* rt, const char* luau_type_declarations); /* used by ld_check only */
 
-/* Execution */
+/* Execution. A runtime runs at most one execution at a time: ld_exec_start returns LD_ERROR
+ * (with *out left NULL) if an execution started on this runtime has not been freed yet. For
+ * concurrency, use a pool of runtimes. */
 LD_API ld_status ld_exec_start(ld_runtime* rt, const char* source, size_t source_len, const char* input_json,
                                const char* context_json, ld_exec** out);
 LD_API ld_status ld_exec_resume(ld_exec* ex, const char* result_json, size_t result_len);

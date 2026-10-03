@@ -1,0 +1,12 @@
+# ThreadSanitizer suppressions for LunarDyson.
+#
+# The watchdog thread writes lua_Callbacks::interrupt (src/watchdog.cpp, in loop())
+# to arm the deadline, while the Luau VM reads that pointer at safepoints inside
+# luau_execute on the execution thread. Luau's VM/include/lua.h documents this exact
+# pattern as safe:
+#   "interrupt is safe to set from an arbitrary thread but all other callbacks
+#    can only be changed when the VM is not running any code"
+# The VM-side read is compiled Luau code we can't annotate without forking, so the
+# race is suppressed on both frames of this single, sanctioned interaction.
+race:luau_execute
+race:Watchdog::loop

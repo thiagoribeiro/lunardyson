@@ -115,17 +115,19 @@ The RiteSmith integration tests read `../ritesmith/benchmarks/luau_codegen/tasks
 
 ## Known limitations (v0.1)
 
-- **Threading.** A runtime is not thread-safe. Several *suspended* executions may
-  share one runtime, but they also share its memory budget. For parallelism, use a
-  pool of runtimes (the Python binding releases the GIL inside C calls).
+- **Threading.** A runtime is not thread-safe, and runs **one execution at a time**:
+  `ld_exec_start` rejects a second execution until the first is freed. For parallelism,
+  use a pool of runtimes (the Python binding releases the GIL inside C calls). The
+  memory budget is therefore per-execution (one execution owns the runtime's heap).
 - **Tool time.** The VM time budget excludes time spent inside tools. Tool timeouts
   belong to the host.
 - **Deadline precision.** Deadlines are enforced at VM safepoints (loop back-edges,
   calls). One long C builtin call can overrun until it returns; the memory budget
   bounds the expensive ones (`string.rep`, concatenation).
-- **Watchdog race.** The watchdog writes the runtime's `interrupt` pointer from
-  another thread. Luau supports this, but it is formally a data race, so
-  ThreadSanitizer will flag it.
+- **Watchdog race.** The watchdog sets the runtime's `interrupt` pointer from another
+  thread while the VM reads it — a pattern Luau's `lua.h` documents as safe. The build
+  is verified under ThreadSanitizer (`-DLD_TSAN=ON`) with that one sanctioned read
+  suppressed (`tsan-suppressions.txt`); no other races.
 - **In-process.** A bug in the core takes the host down with it. Process-level
   isolation (worker pool, `lunardyson-server`) is on the roadmap.
 - **JSON at the boundary.** Every tool call costs one encode and one decode on each

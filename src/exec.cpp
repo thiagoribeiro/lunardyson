@@ -126,8 +126,12 @@ ld_status step(ld_exec* ex, int nargs, bool raise)
     uint64_t budget_ns = uint64_t(rt->limits.cpu_time_ms) * 1000000ull;
     uint64_t remaining_ns = budget_ns > ex->vm_ns ? budget_ns - ex->vm_ns : 0;
     uint64_t generation = ++rt->slice_generation;
-    if (remaining_ns == 0 || ex->sticky == LD_ERR_TIMEOUT)
-        lua_callbacks(rt->L)->interrupt = ld_interrupt; // already out of time: fail at the first safepoint
+    // Already out of budget from earlier slices: mark the timeout here (only this thread
+    // touches sticky) instead of writing the interrupt pointer ourselves — the watchdog is
+    // the sole writer of ->interrupt. We still arm it (deadline in the past) as a backstop.
+    if (remaining_ns == 0)
+        ld_set_sticky(ex, LD_ERR_TIMEOUT,
+                      "execution exceeded " + std::to_string(rt->limits.cpu_time_ms) + " ms");
     ld_watchdog_arm(rt, generation, ex->slice_start + std::chrono::nanoseconds(remaining_ns));
 
     int status = raise ? lua_resumeerror(ex->T, nullptr) : lua_resume(ex->T, nullptr, nargs);
@@ -211,9 +215,12 @@ LD_API ld_status ld_exec_start(ld_runtime* rt, const char* source, size_t source
     *out = nullptr;
     if (!rt || !source)
         return LD_ERROR;
+    if (rt->live_exec)
+        return LD_ERROR; // one in-flight execution per runtime — use a pool for concurrency
 
     auto* ex = new ld_exec();
     *out = ex;
+    rt->live_exec = true;
     ex->rt = rt;
     ex->input_json = input_json && *input_json ? input_json : "{}";
     ex->context_json = context_json && *context_json ? context_json : "{}";
@@ -350,6 +357,8 @@ LD_API void ld_exec_free(ld_exec* ex)
 {
     if (!ex)
         return;
+    if (ex->rt)
+        ex->rt->live_exec = false; // the runtime can start a new execution again
     if (ex->thread_ref != LUA_NOREF && ex->rt && ex->rt->L)
     {
         lua_unref(ex->rt->L, ex->thread_ref);

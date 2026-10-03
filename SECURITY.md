@@ -30,7 +30,16 @@ under ASan/UBSan (`LD_SANITIZE=ON`).
   but what a tool does (SSRF checks, authorization, idempotency) is the host's job.
 - **Timing side channels** are out of scope.
 
+## Thread safety of the timeout watchdog
+
+The CPU-time deadline is enforced by a watchdog thread that sets the runtime's
+`interrupt` pointer; the VM reads it at safepoints on the execution thread. Luau's
+`VM/include/lua.h` sanctions this ("interrupt is safe to set from an arbitrary
+thread"). The build runs clean under ThreadSanitizer (`-DLD_TSAN=ON`) with only that
+single sanctioned read suppressed, documented in `tsan-suppressions.txt`. A runtime
+otherwise runs one execution at a time and is not shared across threads.
+
 ## Updating Luau
 
 Luau is pinned by the `extern/luau` submodule. Every bump must pass the full
-conformance suite, the sanitizer build and the C smoke test.
+conformance suite, the sanitizer build (ASan/UBSan and TSan) and the C smoke test.

@@ -39,6 +39,7 @@ struct ld_runtime
     bool sealed = false;
     size_t baseline = 0;
     ld_exec* running = nullptr; // execution currently inside lua_resume
+    bool live_exec = false; // an execution exists (started, not yet freed) — at most one at a time
     uint64_t slice_generation = 0; // identifies the current VM slice to the watchdog
     Checker* checker = nullptr;
 };

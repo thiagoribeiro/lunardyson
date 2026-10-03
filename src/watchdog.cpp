@@ -74,11 +74,15 @@ private:
                 continue;
             }
             auto next = slices_.begin();
-            if (std::chrono::steady_clock::now() < next->first)
+            // Copy the deadline by value: cv_.wait_until releases the lock, during which
+            // disarm() can erase this slice and free the map node. Waiting on a reference
+            // into the node (next->first) would then be a use-after-free (caught by ASan).
+            const auto deadline = next->first;
+            if (std::chrono::steady_clock::now() < deadline)
             {
-                wake_at_ = next->first;
-                cv_.wait_until(lock, next->first);
-                continue;
+                wake_at_ = deadline;
+                cv_.wait_until(lock, deadline);
+                continue; // re-fetch begin() fresh; `next` may be dangling after the wait
             }
             lua_callbacks(next->second.rt->L)->interrupt = ld_interrupt;
             slices_.erase(next);
