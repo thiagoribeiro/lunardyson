@@ -1,6 +1,6 @@
 [project]
 name = "lunardyson"
-version = "0.1.1"
+version = "0.1.2"
 description = "Execution runtime for untrusted Luau programs that orchestrate tools"
 requires-python = ">=3.10"
 dependencies = ["cffi>=1.16"]
