@@ -57,6 +57,9 @@ jobs:
         working-directory: build-fuzz
         env:
           ASAN_OPTIONS: detect_leaks=1
+          # Any UB is fatal (becomes a reproducer), except the known upstream Luau report
+          # listed in the suppressions file.
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1:suppressions=${{ github.workspace }}/tests/fuzz/ubsan-suppressions.txt
         run: |
           dir=corpus/${{ matrix.target == 'fuzz_exec' && 'exec' || 'check' }}
           mkdir -p crashes

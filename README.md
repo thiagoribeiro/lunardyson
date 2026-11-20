@@ -169,6 +169,9 @@ request, and a longer run every night.
   or container.
 - **Tools are the host's job.** That covers authorization, SSRF checks and idempotency.
 - **Timing side channels** are out of scope.
+- **Out-of-range integer arguments to builtins** (such as `string.sub(s, 1e15)`) give
+  platform-dependent results. This is a plain cast in upstream Luau, which considers it
+  known behaviour ([#3100](https://github.com/luau-lang/luau/issues/3100)).
 
 Details are in [SECURITY.md](SECURITY.md).
 
@@ -228,6 +231,7 @@ Fuzzing (clang):
 ```bash
 CC=clang CXX=clang++ cmake -S . -B build-fuzz -G Ninja -DLD_FUZZ=ON -DLD_BUILD_TESTS=OFF && cmake --build build-fuzz
 python3 tests/fuzz/make_corpus.py build-fuzz/corpus        # seeds: conformance cases + RiteSmith tasks
+export UBSAN_OPTIONS=halt_on_error=1:suppressions=$PWD/tests/fuzz/ubsan-suppressions.txt
 cd build-fuzz && ./fuzz_exec -max_total_time=300 corpus/exec && ./fuzz_check -max_total_time=300 corpus/check
 ```
 
