@@ -1,6 +1,8 @@
 """Step API, check(), lifecycle and concurrency behaviour of the Python binding."""
 
 import threading
+import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +24,9 @@ def crm_runtime(**kwargs) -> ld.Runtime:
 
 
 def test_version():
-    assert ld.version() == "0.1.0"
+    # The library (CMake) and the Python package must ship the same version.
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    assert ld.version() == tomllib.loads(pyproject.read_text())["project"]["version"]
 
 
 def test_step_api_exposes_sequential_calls():
