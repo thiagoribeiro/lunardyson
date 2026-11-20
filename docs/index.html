@@ -384,8 +384,10 @@ ld_status st = <span class="f">ld_exec_start</span>(rt, src, len, <span class="s
       <div class="container">
         <h2>What it guarantees, and how that is tested</h2>
         <p class="section-lead">
-          Every control has a conformance case. The same 32-case attack and contract suite runs in every binding,
-          and the core is built and run under ASan, UBSan, LeakSanitizer and ThreadSanitizer.
+          Every control has a conformance case. The same attack and contract suite runs in every binding, and
+          the core is built and run under ASan, UBSan, LeakSanitizer and ThreadSanitizer. Two libFuzzer targets
+          run in CI: one runs arbitrary programs with arbitrary tool replies and checks the guarantees on every
+          step, and the other feeds arbitrary source to the type checker.
         </p>
         <div class="table-wrap">
           <table>
@@ -477,11 +479,10 @@ ld_status st = <span class="f">ld_exec_start</span>(rt, src, len, <span class="s
         <div class="card">
           <h3>Roadmap</h3>
           <ul class="plain">
-            <li>Isolation tiers: a worker process pool and <code>lunardyson-server</code></li>
-            <li>Faster tool path in the Python binding, or a zero-copy value API</li>
-            <li>Optional native codegen for CPU-bound programs</li>
-            <li>A GC policy without a full collection per execution</li>
-            <li>Wheels for x86_64 and aarch64, fuzzing in CI</li>
+            <li><strong>Next:</strong> process isolation. The VM runs in a child process with a memory limit, and tools stay in the host, bridged by the step API. This grows into <code>lunardyson-server</code></li>
+            <li>An async host helper built on <code>start()</code>/<code>resume()</code></li>
+            <li><strong>Only if profiling asks:</strong> a faster tool path, native codegen, a lighter GC policy</li>
+            <li><strong>Done:</strong> CI on x86_64 and aarch64 with sanitizers, release wheels, continuous fuzzing</li>
           </ul>
         </div>
       </div>

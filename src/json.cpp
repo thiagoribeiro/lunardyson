@@ -121,7 +121,8 @@ yyjson_mut_val* encode_table(yyjson_mut_doc* doc, lua_State* L, int idx, int dep
         {
             size_t len;
             const char* s = lua_tolstring(L, -2, &len);
-            key = yyjson_mut_strncpy(doc, s, len);
+            const std::string clean = ld_utf8_sanitize(s, len);
+            key = yyjson_mut_strncpy(doc, clean.data(), clean.size());
         }
         else if (kt == LUA_TNUMBER)
         {
@@ -183,7 +184,8 @@ yyjson_mut_val* encode_value(yyjson_mut_doc* doc, lua_State* L, int idx, int dep
     {
         size_t len;
         const char* s = lua_tolstring(L, idx, &len);
-        return yyjson_mut_strncpy(doc, s, len);
+        const std::string clean = ld_utf8_sanitize(s, len);
+        return yyjson_mut_strncpy(doc, clean.data(), clean.size());
     }
     case LUA_TTABLE:
         return encode_table(doc, L, idx, depth, err);
@@ -241,4 +243,58 @@ bool ld_json_encode(lua_State* L, int idx, std::string* out, std::string* err)
     out->assign(s, len);
     free(s);
     return true;
+}
+
+std::string ld_utf8_sanitize(const char* s, size_t len)
+{
+    static constexpr char kReplacement[] = "\xEF\xBF\xBD"; // U+FFFD
+    const auto* p = reinterpret_cast<const unsigned char*>(s);
+    std::string out;
+    out.reserve(len);
+    size_t i = 0;
+    while (i < len)
+    {
+        const unsigned char c = p[i];
+        if (c < 0x80)
+        {
+            out.push_back(char(c));
+            ++i;
+            continue;
+        }
+        size_t n;     // continuation bytes
+        uint32_t cp;  // code point being decoded
+        if (c >= 0xC2 && c <= 0xDF)
+            n = 1, cp = c & 0x1F;
+        else if (c >= 0xE0 && c <= 0xEF)
+            n = 2, cp = c & 0x0F;
+        else if (c >= 0xF0 && c <= 0xF4)
+            n = 3, cp = c & 0x07;
+        else
+            n = 0, cp = 0; // stray continuation byte, 0xC0/0xC1 or 0xF5..0xFF
+
+        bool ok = n > 0 && i + n < len;
+        for (size_t k = 1; ok && k <= n; ++k)
+        {
+            if ((p[i + k] & 0xC0) != 0x80)
+                ok = false;
+            else
+                cp = (cp << 6) | (p[i + k] & 0x3F);
+        }
+        // Overlong forms, UTF-16 surrogates and code points past U+10FFFF are not UTF-8.
+        if (ok && ((n == 2 && cp < 0x800) || (n == 3 && (cp < 0x10000 || cp > 0x10FFFF)) ||
+                   (cp >= 0xD800 && cp <= 0xDFFF)))
+            ok = false;
+
+        if (ok)
+        {
+            out.append(s + i, n + 1);
+            i += n + 1;
+        }
+        else
+        {
+            out += kReplacement;
+            ++i;
+        }
+    }
+    return out;
 }

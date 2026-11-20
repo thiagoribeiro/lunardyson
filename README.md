@@ -13,7 +13,8 @@
   <img alt="status: v0.1" src="https://img.shields.io/badge/status-v0.1-8fb8ff">
   <img alt="license: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-c8d4e6">
   <img alt="bindings: C · Python · Go" src="https://img.shields.io/badge/bindings-C%20%C2%B7%20Python%20%C2%B7%20Go-c8d4e6">
-  <img alt="conformance: 32/32" src="https://img.shields.io/badge/conformance-32%2F32-7fd88a">
+  <a href="https://github.com/thiagoribeiro/lunardyson/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/thiagoribeiro/lunardyson/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/thiagoribeiro/lunardyson/actions/workflows/fuzz.yml"><img alt="Fuzz" src="https://github.com/thiagoribeiro/lunardyson/actions/workflows/fuzz.yml/badge.svg"></a>
 </p>
 
 ---
@@ -135,9 +136,21 @@ array, and any other table becomes an object.
 
 ## Security model
 
-Every control has a conformance case. The same 32-case attack and contract suite
-([`tests/conformance/cases.json`](tests/conformance/cases.json)) runs in every binding. The
-core also runs under ASan, UBSan, LeakSanitizer and ThreadSanitizer.
+Every control has a conformance case. The same attack and contract suite
+([`tests/conformance/cases.json`](tests/conformance/cases.json)) runs in every binding, and the
+core runs under ASan, UBSan, LeakSanitizer and ThreadSanitizer.
+
+Two libFuzzer targets ([`tests/fuzz/`](tests/fuzz)) run in CI: a 60-second run on every pull
+request, and a longer run every night.
+- `fuzz_exec` runs arbitrary programs with arbitrary tool replies. It checks the guarantees on
+  every step:
+  - only registered tools reach the host;
+  - each call carries its declared effect;
+  - `call_id`s are sequential;
+  - per-tool and per-effect budgets hold;
+  - memory and VM time stay within budget;
+  - every error has a known kind.
+- `fuzz_check` feeds arbitrary source to the type checker.
 
 | Threat | Control |
 |---|---|
@@ -210,6 +223,14 @@ cd bindings/go && go test ./...                                            # con
 ASAN_OPTIONS=detect_leaks=1 ./build-asan/ld_smoke                          # C consumer under sanitizers
 ```
 
+Fuzzing (clang):
+
+```bash
+CC=clang CXX=clang++ cmake -S . -B build-fuzz -G Ninja -DLD_FUZZ=ON -DLD_BUILD_TESTS=OFF && cmake --build build-fuzz
+python3 tests/fuzz/make_corpus.py build-fuzz/corpus        # seeds: conformance cases + RiteSmith tasks
+cd build-fuzz && ./fuzz_exec -max_total_time=300 corpus/exec && ./fuzz_check -max_total_time=300 corpus/check
+```
+
 The RiteSmith integration tests read their tasks from
 `../ritesmith/benchmarks/luau_codegen/tasks`. Set `LD_BENCH_TASKS` to use another directory.
 If the directory is absent, those tests are skipped.
@@ -223,6 +244,7 @@ bindings/python             cffi (ABI mode) — no per-Python-version build
 bindings/go                 cgo
 tests/conformance           language-neutral attack/contract suite, run by every binding
 tests/c/smoke.c             plain-C consumer, run under ASan/UBSan/LSan
+tests/fuzz/                 libFuzzer targets (exec, check) and the corpus seeder
 bench/overhead.py           per-execution overhead vs lupa
 docs/                       the website (GitHub Pages)
 ```
@@ -243,13 +265,20 @@ docs/                       the website (GitHub Pages)
 
 ## Roadmap
 
-- Isolation tiers: a worker process pool, and `lunardyson-server`.
-- A faster tool path in the Python binding (fewer allocations, faster JSON), or a zero-copy
-  value API.
-- Optional native codegen for CPU-bound programs.
-- A GC policy that avoids a full collection on every execution, while keeping the memory
-  budget honest.
-- Wheels for x86_64 and aarch64, and fuzzing in CI.
+- **Process isolation.** The next step: run the VM in a child process with a memory limit, and
+  keep tools in the host, bridged by the step API. This grows into `lunardyson-server`.
+- **Async host helper:** an `execute_async` built on `start()`/`resume()`, for hosts that run
+  many programs with slow tools at once.
+- **Only if profiling asks.** Each of these is microseconds against tool calls that take
+  milliseconds:
+  - a faster tool path in the Python binding (or a zero-copy value API);
+  - native codegen for CPU-bound programs;
+  - a GC policy that skips the full collection per execution.
+
+**Done:**
+- CI on x86_64 and aarch64, with sanitizers.
+- Release wheels for both architectures.
+- Continuous fuzzing.
 
 ## The name
 

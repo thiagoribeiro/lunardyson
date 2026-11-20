@@ -11,6 +11,8 @@
 
 #include "yyjson.h"
 
+#include <cstdlib>
+#include <cstring>
 #include <map>
 
 namespace
@@ -98,14 +100,27 @@ char* to_json(const std::vector<Diagnostic>& diags)
         yyjson_mut_val* o = yyjson_mut_obj(doc);
         yyjson_mut_obj_add_int(doc, o, "line", d.line);
         yyjson_mut_obj_add_int(doc, o, "column", d.column);
-        yyjson_mut_obj_add_strcpy(doc, o, "kind", d.kind.c_str());
+        // Analyzer messages quote the source, which may hold any bytes.
+        const std::string kind = ld_utf8_sanitize(d.kind.data(), d.kind.size());
+        const std::string message = ld_utf8_sanitize(d.message.data(), d.message.size());
+        yyjson_mut_obj_add_strncpy(doc, o, "kind", kind.data(), kind.size());
         yyjson_mut_obj_add_strcpy(doc, o, "severity", d.severity.c_str());
-        yyjson_mut_obj_add_strcpy(doc, o, "message", d.message.c_str());
+        yyjson_mut_obj_add_strncpy(doc, o, "message", message.data(), message.size());
         yyjson_mut_arr_append(arr, o);
     }
     yyjson_mut_doc_set_root(doc, arr);
     char* out = yyjson_mut_write(doc, 0, nullptr);
     yyjson_mut_doc_free(doc);
+    if (!out)
+    {
+        // Never hand the host NULL for a check that ran: report the failure as a diagnostic.
+        static constexpr char kFallback[] =
+            "[{\"line\":0,\"column\":0,\"kind\":\"InternalError\",\"severity\":\"error\","
+            "\"message\":\"diagnostics could not be encoded\"}]";
+        out = static_cast<char*>(malloc(sizeof(kFallback)));
+        if (out)
+            memcpy(out, kFallback, sizeof(kFallback));
+    }
     return out;
 }
 

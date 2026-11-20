@@ -1,0 +1,70 @@
+name: Fuzz
+
+# Nightly libFuzzer run of both targets, plus a short run on every pull request.
+# A crash fails the job and uploads the reproducer; turn it into a conformance case
+# or a smoke test with the fix.
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Run time per target (seconds)"
+        default: "600"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [fuzz_exec, fuzz_check]
+    runs-on: ubuntu-24.04
+    env:
+      SECONDS_PER_TARGET: ${{ github.event_name == 'pull_request' && '60' || inputs.seconds || '600' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/checkout@v4
+        with:
+          repository: thiagoribeiro/ritesmith
+          path: ritesmith
+          sparse-checkout: benchmarks/luau_codegen/tasks
+      - name: Install build tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build clang
+      - name: Build fuzzers
+        run: |
+          CC=clang CXX=clang++ cmake -S . -B build-fuzz -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DLD_FUZZ=ON -DLD_BUILD_TESTS=OFF
+          cmake --build build-fuzz --target ${{ matrix.target }}
+      # The corpus grows across nightly runs; PRs start from it too.
+      - uses: actions/cache@v4
+        with:
+          path: build-fuzz/corpus
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Seed corpus
+        env:
+          LD_BENCH_TASKS: ${{ github.workspace }}/ritesmith/benchmarks/luau_codegen/tasks
+        run: python3 tests/fuzz/make_corpus.py build-fuzz/corpus
+      - name: Fuzz for ${{ env.SECONDS_PER_TARGET }} s
+        working-directory: build-fuzz
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+        run: |
+          dir=corpus/${{ matrix.target == 'fuzz_exec' && 'exec' || 'check' }}
+          mkdir -p crashes
+          ./${{ matrix.target }} -max_total_time=$SECONDS_PER_TARGET -timeout=10 -rss_limit_mb=3072 \
+            -artifact_prefix=crashes/ -print_final_stats=1 "$dir"
+      - name: Upload reproducers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crashes-${{ matrix.target }}
+          path: build-fuzz/crashes/
