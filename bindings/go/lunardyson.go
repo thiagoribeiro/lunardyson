@@ -10,6 +10,7 @@ package lunardyson
 #cgo CFLAGS: -I${SRCDIR}/../../include
 #cgo LDFLAGS: -L${SRCDIR}/../../build -llunardyson -Wl,-rpath,${SRCDIR}/../../build
 #include <stdlib.h>
+#include <string.h>
 #include "lunardyson.h"
 */
 import "C"
@@ -28,6 +29,35 @@ var errorKinds = []string{"none", "syntax", "timeout", "memory", "tool_budget", 
 	"unknown_tool", "runtime", "contract", "invalid_arg"}
 
 var effects = map[string]C.ld_effect{"pure": 0, "read": 1, "write": 2, "external_write": 3, "money": 4}
+
+var effectNames = [...]string{"pure", "read", "write", "external_write", "money"}
+
+var statusNames = [...]string{"done", "pending_tool", "error"}
+
+// cstr points C at a Go string's bytes without copying. Only for calls that take an explicit
+// length and do not keep the pointer (cgo allows Go memory without Go pointers in it).
+func cstr(s string) *C.char {
+	if s == "" {
+		return (*C.char)(unsafe.Pointer(&zero))
+	}
+	return (*C.char)(unsafe.Pointer(unsafe.StringData(s)))
+}
+
+var zero byte
+
+// cjson appends the NUL that the length-less C parameters need and points C at it (no extra copy).
+func cjson(b []byte) *C.char {
+	b = append(b, 0)
+	return (*C.char)(unsafe.Pointer(&b[0]))
+}
+
+// view is a Go slice over C memory, valid only while that memory is (no copy).
+func view(p *C.char, n C.size_t) []byte {
+	if p == nil || n == 0 {
+		return nil
+	}
+	return unsafe.Slice((*byte)(unsafe.Pointer(p)), int(n))
+}
 
 // ToolFunc handles one tool call. A returned error is raised inside the program.
 type ToolFunc func(args any) (any, error)
@@ -151,19 +181,17 @@ type Diagnostic struct {
 }
 
 func (rt *Runtime) Check(source string, strict bool) ([]Diagnostic, error) {
-	src := C.CString(source)
-	defer C.free(unsafe.Pointer(src))
 	s := C.int(0)
 	if strict {
 		s = 1
 	}
-	raw := C.ld_check(rt.ptr, src, C.size_t(len(source)), s)
+	raw := C.ld_check(rt.ptr, cstr(source), C.size_t(len(source)), s)
 	if raw == nil {
 		return nil, errors.New("check failed")
 	}
 	defer C.ld_free(unsafe.Pointer(raw))
 	var diags []Diagnostic
-	err := json.Unmarshal([]byte(C.GoString(raw)), &diags)
+	err := json.Unmarshal(view(raw, C.strlen(raw)), &diags)
 	return diags, err
 }
 
@@ -189,15 +217,8 @@ func (rt *Runtime) Start(source string, input, context any) (*Execution, error) 
 	if err != nil {
 		return nil, err
 	}
-	src := C.CString(source)
-	cin := C.CString(string(in))
-	cctx := C.CString(string(ctx))
-	defer C.free(unsafe.Pointer(src))
-	defer C.free(unsafe.Pointer(cin))
-	defer C.free(unsafe.Pointer(cctx))
-
 	var out *C.ld_exec
-	status := C.ld_exec_start(rt.ptr, src, C.size_t(len(source)), cin, cctx, &out)
+	status := C.ld_exec_start(rt.ptr, cstr(source), C.size_t(len(source)), cjson(in), cjson(ctx), &out)
 	if out == nil {
 		return nil, errors.New("could not start execution")
 	}
@@ -205,7 +226,7 @@ func (rt *Runtime) Start(source string, input, context any) (*Execution, error) 
 }
 
 func (ex *Execution) Status() string {
-	return [...]string{"done", "pending_tool", "error"}[ex.status]
+	return statusNames[ex.status]
 }
 
 func (ex *Execution) Pending() (Call, bool) {
@@ -214,14 +235,8 @@ func (ex *Execution) Pending() (Call, bool) {
 		return Call{}, false
 	}
 	var args any
-	_ = json.Unmarshal(C.GoBytes(unsafe.Pointer(c.args_json), C.int(c.args_len)), &args)
-	effect := "read"
-	for name, e := range effects {
-		if e == c.effect {
-			effect = name
-		}
-	}
-	return Call{ID: uint64(c.call_id), Tool: C.GoString(c.tool), Args: args, Effect: effect}, true
+	_ = json.Unmarshal(view(c.args_json, c.args_len), &args)
+	return Call{ID: uint64(c.call_id), Tool: C.GoString(c.tool), Args: args, Effect: effectNames[c.effect]}, true
 }
 
 func (ex *Execution) Resume(result any) (string, error) {
@@ -229,9 +244,7 @@ func (ex *Execution) Resume(result any) (string, error) {
 	if err != nil {
 		return ex.Status(), err
 	}
-	cp := C.CString(string(payload))
-	defer C.free(unsafe.Pointer(cp))
-	ex.status = C.ld_exec_resume(ex.ptr, cp, C.size_t(len(payload)))
+	ex.status = C.ld_exec_resume(ex.ptr, (*C.char)(unsafe.Pointer(&payload[0])), C.size_t(len(payload)))
 	return ex.Status(), nil
 }
 
@@ -249,7 +262,7 @@ func (ex *Execution) Result() Result {
 		var n C.size_t
 		out := C.ld_exec_output(ex.ptr, &n)
 		var value any
-		_ = json.Unmarshal(C.GoBytes(unsafe.Pointer(out), C.int(n)), &value)
+		_ = json.Unmarshal(view(out, n), &value)
 		return Result{OK: true, Output: value, ErrorKind: "none", Stats: stats}
 	}
 	var msg *C.char
@@ -271,7 +284,7 @@ func (rt *Runtime) Execute(source string, input, context any) (Result, error) {
 		return Result{}, err
 	}
 	defer ex.Close()
-	for ex.Status() == "pending_tool" {
+	for ex.status == C.LD_PENDING_TOOL {
 		call, _ := ex.Pending()
 		fn := rt.tools[call.Tool]
 		if fn == nil {

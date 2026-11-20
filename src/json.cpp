@@ -83,6 +83,24 @@ bool push_value(lua_State* L, yyjson_val* v, int depth, std::string* err)
     }
 }
 
+bool is_json_int(double d)
+{
+    return std::floor(d) == d && std::fabs(d) < 1e15;
+}
+
+// String at `idx` as a JSON string. Valid UTF-8 (the common case) is referenced, not copied:
+// the Luau string is immutable, reachable from the value being encoded (which stays on the
+// stack), the GC does not move objects, and the document is written before encoding returns.
+yyjson_mut_val* mut_str(yyjson_mut_doc* doc, lua_State* L, int idx)
+{
+    size_t len;
+    const char* s = lua_tolstring(L, idx, &len);
+    if (ld_utf8_valid(s, len))
+        return yyjson_mut_strn(doc, s, len);
+    const std::string clean = ld_utf8_sanitize(s, len);
+    return yyjson_mut_strncpy(doc, clean.data(), clean.size());
+}
+
 yyjson_mut_val* encode_value(yyjson_mut_doc* doc, lua_State* L, int idx, int depth, std::string* err);
 
 yyjson_mut_val* encode_table(yyjson_mut_doc* doc, lua_State* L, int idx, int depth, std::string* err)
@@ -119,16 +137,13 @@ yyjson_mut_val* encode_table(yyjson_mut_doc* doc, lua_State* L, int idx, int dep
         int kt = lua_type(L, -2);
         if (kt == LUA_TSTRING)
         {
-            size_t len;
-            const char* s = lua_tolstring(L, -2, &len);
-            const std::string clean = ld_utf8_sanitize(s, len);
-            key = yyjson_mut_strncpy(doc, clean.data(), clean.size());
+            key = mut_str(doc, L, -2);
         }
         else if (kt == LUA_TNUMBER)
         {
             char buf[64];
             double d = lua_tonumber(L, -2);
-            if (std::floor(d) == d && std::fabs(d) < 1e15)
+            if (is_json_int(d))
                 snprintf(buf, sizeof(buf), "%lld", (long long)d);
             else
                 snprintf(buf, sizeof(buf), "%.14g", d);
@@ -176,17 +191,12 @@ yyjson_mut_val* encode_value(yyjson_mut_doc* doc, lua_State* L, int idx, int dep
         double d = lua_tonumber(L, idx);
         if (!std::isfinite(d))
             return yyjson_mut_null(doc);
-        if (std::floor(d) == d && std::fabs(d) < 1e15)
+        if (is_json_int(d))
             return yyjson_mut_sint(doc, (int64_t)d);
         return yyjson_mut_real(doc, d);
     }
     case LUA_TSTRING:
-    {
-        size_t len;
-        const char* s = lua_tolstring(L, idx, &len);
-        const std::string clean = ld_utf8_sanitize(s, len);
-        return yyjson_mut_strncpy(doc, clean.data(), clean.size());
-    }
+        return mut_str(doc, L, idx);
     case LUA_TTABLE:
         return encode_table(doc, L, idx, depth, err);
     default:
@@ -215,10 +225,9 @@ bool ld_json_push(lua_State* L, const char* json, size_t len, std::string* err)
     return true;
 }
 
-bool ld_json_encode(lua_State* L, int idx, std::string* out, std::string* err)
+bool ld_json_encode(lua_State* L, int idx, JsonBuf* out, std::string* err)
 {
-    if (idx < 0 && idx > LUA_REGISTRYINDEX)
-        idx = lua_gettop(L) + idx + 1;
+    idx = lua_absindex(L, idx);
 
     std::unique_ptr<yyjson_mut_doc, DocFree> doc(yyjson_mut_doc_new(nullptr));
     if (!doc)
@@ -240,8 +249,57 @@ bool ld_json_encode(lua_State* L, int idx, std::string* out, std::string* err)
         *err = "JSON serialization failed";
         return false;
     }
-    out->assign(s, len);
-    free(s);
+    out->data.reset(s); // keep yyjson's buffer as the result: no copy
+    out->size = len;
+    return true;
+}
+
+namespace
+{
+
+// Length of the well-formed UTF-8 sequence starting at p[i], or 0 if it is not one.
+size_t utf8_seq_len(const unsigned char* p, size_t i, size_t len)
+{
+    const unsigned char c = p[i];
+    if (c < 0x80)
+        return 1;
+    size_t n;    // continuation bytes
+    uint32_t cp; // code point being decoded
+    if (c >= 0xC2 && c <= 0xDF)
+        n = 1, cp = c & 0x1F;
+    else if (c >= 0xE0 && c <= 0xEF)
+        n = 2, cp = c & 0x0F;
+    else if (c >= 0xF0 && c <= 0xF4)
+        n = 3, cp = c & 0x07;
+    else
+        return 0; // stray continuation byte, 0xC0/0xC1 or 0xF5..0xFF
+
+    if (i + n >= len)
+        return 0;
+    for (size_t k = 1; k <= n; ++k)
+    {
+        if ((p[i + k] & 0xC0) != 0x80)
+            return 0;
+        cp = (cp << 6) | (p[i + k] & 0x3F);
+    }
+    // Overlong forms, UTF-16 surrogates and code points past U+10FFFF are not UTF-8.
+    if ((n == 2 && cp < 0x800) || (n == 3 && (cp < 0x10000 || cp > 0x10FFFF)) || (cp >= 0xD800 && cp <= 0xDFFF))
+        return 0;
+    return n + 1;
+}
+
+} // namespace
+
+bool ld_utf8_valid(const char* s, size_t len)
+{
+    const auto* p = reinterpret_cast<const unsigned char*>(s);
+    for (size_t i = 0; i < len;)
+    {
+        const size_t n = utf8_seq_len(p, i, len);
+        if (n == 0)
+            return false;
+        i += n;
+    }
     return true;
 }
 
@@ -251,44 +309,13 @@ std::string ld_utf8_sanitize(const char* s, size_t len)
     const auto* p = reinterpret_cast<const unsigned char*>(s);
     std::string out;
     out.reserve(len);
-    size_t i = 0;
-    while (i < len)
+    for (size_t i = 0; i < len;)
     {
-        const unsigned char c = p[i];
-        if (c < 0x80)
+        const size_t n = utf8_seq_len(p, i, len);
+        if (n > 0)
         {
-            out.push_back(char(c));
-            ++i;
-            continue;
-        }
-        size_t n;     // continuation bytes
-        uint32_t cp;  // code point being decoded
-        if (c >= 0xC2 && c <= 0xDF)
-            n = 1, cp = c & 0x1F;
-        else if (c >= 0xE0 && c <= 0xEF)
-            n = 2, cp = c & 0x0F;
-        else if (c >= 0xF0 && c <= 0xF4)
-            n = 3, cp = c & 0x07;
-        else
-            n = 0, cp = 0; // stray continuation byte, 0xC0/0xC1 or 0xF5..0xFF
-
-        bool ok = n > 0 && i + n < len;
-        for (size_t k = 1; ok && k <= n; ++k)
-        {
-            if ((p[i + k] & 0xC0) != 0x80)
-                ok = false;
-            else
-                cp = (cp << 6) | (p[i + k] & 0x3F);
-        }
-        // Overlong forms, UTF-16 surrogates and code points past U+10FFFF are not UTF-8.
-        if (ok && ((n == 2 && cp < 0x800) || (n == 3 && (cp < 0x10000 || cp > 0x10FFFF)) ||
-                   (cp >= 0xD800 && cp <= 0xDFFF)))
-            ok = false;
-
-        if (ok)
-        {
-            out.append(s + i, n + 1);
-            i += n + 1;
+            out.append(s + i, n);
+            i += n;
         }
         else
         {

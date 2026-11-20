@@ -106,7 +106,7 @@ class Execution:
         if self._status == 0:
             size = ffi.new("size_t*")
             out = lib.ld_exec_output(self._ptr, size)
-            return Result(True, json.loads(ffi.unpack(out, size[0]).decode()), stats=stats)
+            return Result(True, _loads(ffi.unpack(out, size[0])), stats=stats)
         msg = ffi.new("const char**")
         kind = lib.ld_exec_error(self._ptr, msg)
         text = ffi.string(msg[0]).decode(errors="replace") if msg[0] != ffi.NULL else ""
@@ -186,7 +186,7 @@ class Runtime:
         if raw == ffi.NULL:
             raise LunarDysonError("check failed")
         try:
-            return json.loads(ffi.string(raw).decode())
+            return _loads(ffi.string(raw))
         finally:
             lib.ld_free(raw)
 
@@ -197,8 +197,8 @@ class Runtime:
             self._ptr,
             src,
             len(src),
-            json.dumps(input if input is not None else {}).encode(),
-            json.dumps(context if context is not None else {}).encode(),
+            _dumps(input if input is not None else {}).encode(),
+            _dumps(context if context is not None else {}).encode(),
             out,
         )
         if out[0] == ffi.NULL:

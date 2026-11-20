@@ -21,19 +21,50 @@ namespace
 
 const char* const kContractMessage = "Script must define a 'run(input, context)' function (global, not local)";
 
+// Fails the execution. A sticky violation, once raised, wins over `kind`.
 ld_status finish_error(ld_exec* ex, ld_error_kind kind, std::string message)
 {
     ex->phase = ld_exec::Phase::Finished;
     ex->status = LD_ERROR;
-    ex->error = kind;
-    ex->message = std::move(message);
     ex->pending = false;
+    if (ex->sticky != LD_ERR_NONE)
+    {
+        ex->error = ex->sticky;
+        ex->message = ex->sticky_message;
+    }
+    else
+    {
+        ex->error = kind;
+        ex->message = std::move(message);
+    }
     return ex->status;
 }
 
 ld_status finish_sticky(ld_exec* ex)
 {
-    return finish_error(ex, ex->sticky, ex->sticky_message);
+    return finish_error(ex, ex->sticky, "");
+}
+
+bool has_pending(const ld_exec* ex)
+{
+    return ex && ex->status == LD_PENDING_TOOL && ex->pending;
+}
+
+uint64_t budget_ns(const ld_runtime* rt)
+{
+    return uint64_t(rt->limits.cpu_time_ms) * 1000000ull;
+}
+
+// VM time spent so far, including the slice in progress.
+uint64_t elapsed_ns(const ld_exec* ex)
+{
+    return ex->vm_ns +
+           uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - ex->slice_start).count());
+}
+
+void set_timeout(ld_exec* ex)
+{
+    ld_set_sticky(ex, LD_ERR_TIMEOUT, "execution exceeded " + std::to_string(ex->rt->limits.cpu_time_ms) + " ms");
 }
 
 std::string error_text(lua_State* T)
@@ -46,11 +77,11 @@ std::string error_text(lua_State* T)
 }
 
 // Push a JSON document onto T, converting Luau errors (e.g. memory) into false.
-bool push_json(ld_exec* ex, const std::string& json, std::string* err)
+bool push_json(ld_exec* ex, const char* json, size_t len, std::string* err)
 {
     try
     {
-        return ld_json_push(ex->T, json.data(), json.size(), err);
+        return ld_json_push(ex->T, json, len, err);
     }
     catch (...)
     {
@@ -77,12 +108,6 @@ ld_status resume_with_error(ld_exec* ex, const std::string& message)
     return step(ex, 0, true);
 }
 
-// Host API misuse (e.g. resume with nothing pending): reported, never mutates the execution.
-ld_status misuse(ld_exec*)
-{
-    return LD_ERROR;
-}
-
 ld_status after_load(ld_exec* ex)
 {
     lua_State* T = ex->T;
@@ -92,8 +117,9 @@ ld_status after_load(ld_exec* ex)
         return finish_error(ex, LD_ERR_CONTRACT, kContractMessage);
 
     std::string err;
-    if (!push_json(ex, ex->input_json, &err) || !push_json(ex, ex->context_json, &err))
-        return ex->sticky != LD_ERR_NONE ? finish_sticky(ex) : finish_error(ex, LD_ERR_INVALID_ARG, err);
+    if (!push_json(ex, ex->input_json.data(), ex->input_json.size(), &err) ||
+        !push_json(ex, ex->context_json.data(), ex->context_json.size(), &err))
+        return finish_error(ex, LD_ERR_INVALID_ARG, err);
 
     ex->phase = ld_exec::Phase::Run;
     return step(ex, 2, false);
@@ -105,7 +131,8 @@ ld_status after_run(ld_exec* ex)
     if (lua_gettop(T) == 0 || !lua_istable(T, 1))
         return finish_error(ex, LD_ERR_CONTRACT, "run() must return a table");
 
-    std::string out, err;
+    JsonBuf out;
+    std::string err;
     if (!ld_json_encode(T, 1, &out, &err))
         return finish_error(ex, LD_ERR_CONTRACT, "run() result is not JSON-serializable: " + err);
 
@@ -123,21 +150,20 @@ ld_status step(ld_exec* ex, int nargs, bool raise)
     rt->alloc.peak = rt->alloc.used;
     ex->slice_start = Clock::now();
 
-    uint64_t budget_ns = uint64_t(rt->limits.cpu_time_ms) * 1000000ull;
-    uint64_t remaining_ns = budget_ns > ex->vm_ns ? budget_ns - ex->vm_ns : 0;
+    const uint64_t budget = budget_ns(rt);
+    const uint64_t remaining_ns = budget > ex->vm_ns ? budget - ex->vm_ns : 0;
     uint64_t generation = ++rt->slice_generation;
     // Already out of budget from earlier slices: mark the timeout here (only this thread
     // touches sticky) instead of writing the interrupt pointer ourselves — the watchdog is
     // the sole writer of ->interrupt. We still arm it (deadline in the past) as a backstop.
     if (remaining_ns == 0)
-        ld_set_sticky(ex, LD_ERR_TIMEOUT,
-                      "execution exceeded " + std::to_string(rt->limits.cpu_time_ms) + " ms");
+        set_timeout(ex);
     ld_watchdog_arm(rt, generation, ex->slice_start + std::chrono::nanoseconds(remaining_ns));
 
     int status = raise ? lua_resumeerror(ex->T, nullptr) : lua_resume(ex->T, nullptr, nargs);
 
     ld_watchdog_disarm(rt, generation);
-    ex->vm_ns += uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - ex->slice_start).count());
+    ex->vm_ns = elapsed_ns(ex);
     rt->running = nullptr;
     if (rt->alloc.peak > rt->baseline && rt->alloc.peak - rt->baseline > ex->peak_bytes)
         ex->peak_bytes = rt->alloc.peak - rt->baseline;
@@ -145,23 +171,18 @@ ld_status step(ld_exec* ex, int nargs, bool raise)
         ld_set_sticky(ex, LD_ERR_MEMORY,
                       "memory budget exceeded (" + std::to_string(rt->limits.memory_limit_bytes) + " bytes)");
 
+    // A violation fails the execution whatever the slice ended with (yield, error or return).
+    if (ex->sticky != LD_ERR_NONE)
+        return finish_sticky(ex);
     if (status == LUA_YIELD)
     {
-        if (ex->sticky != LD_ERR_NONE)
-            return finish_sticky(ex);
         if (!ex->pending)
             return finish_error(ex, LD_ERR_RUNTIME, "program yielded outside a tool call");
         ex->status = LD_PENDING_TOOL;
         return LD_PENDING_TOOL;
     }
     if (status != LUA_OK)
-    {
-        if (ex->sticky != LD_ERR_NONE)
-            return finish_sticky(ex);
         return finish_error(ex, LD_ERR_RUNTIME, error_text(ex->T));
-    }
-    if (ex->sticky != LD_ERR_NONE)
-        return finish_sticky(ex);
 
     return ex->phase == ld_exec::Phase::Load ? after_load(ex) : after_run(ex);
 }
@@ -182,8 +203,7 @@ void ld_interrupt(lua_State* L, int gc)
     if (gc >= 0)
         return; // never raise from inside the garbage collector
 
-    auto* rt = static_cast<ld_runtime*>(lua_callbacks(L)->userdata);
-    ld_exec* ex = rt ? rt->running : nullptr;
+    ld_exec* ex = ld_running(L);
     if (!ex)
         return;
 
@@ -194,11 +214,9 @@ void ld_interrupt(lua_State* L, int gc)
         luaL_error(L, "%s", ex->sticky_message.c_str());
     }
 
-    uint64_t elapsed =
-        ex->vm_ns + uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - ex->slice_start).count());
-    if (elapsed > uint64_t(rt->limits.cpu_time_ms) * 1000000ull)
+    if (elapsed_ns(ex) > budget_ns(ex->rt))
     {
-        ld_set_sticky(ex, LD_ERR_TIMEOUT, "execution exceeded " + std::to_string(rt->limits.cpu_time_ms) + " ms");
+        set_timeout(ex);
         lua_rawcheckstack(L, 1);
         luaL_error(L, "%s", ex->sticky_message.c_str());
     }
@@ -269,8 +287,8 @@ LD_API ld_status ld_exec_start(ld_runtime* rt, const char* source, size_t source
 
 LD_API ld_status ld_exec_resume(ld_exec* ex, const char* result_json, size_t result_len)
 {
-    if (!ex || ex->status != LD_PENDING_TOOL || !ex->pending)
-        return misuse(ex);
+    if (!has_pending(ex))
+        return LD_ERROR; // host misuse: reported, never mutates the execution
 
     const ToolDef& tool = ex->rt->tools[ex->pending_tool];
     ex->pending = false;
@@ -284,10 +302,8 @@ LD_API ld_status ld_exec_resume(ld_exec* ex, const char* result_json, size_t res
     }
 
     std::string err;
-    if (!result_json || !push_json(ex, std::string(result_json, result_len), &err))
+    if (!result_json || !push_json(ex, result_json, result_len, &err)) // straight from the host's buffer
     {
-        if (ex->sticky != LD_ERR_NONE)
-            return finish_sticky(ex);
         return finish_error(ex, LD_ERR_INVALID_ARG, "tool " + tool.name + " result: " + (result_json ? err : "null"));
     }
     return step(ex, 1, false);
@@ -295,8 +311,8 @@ LD_API ld_status ld_exec_resume(ld_exec* ex, const char* result_json, size_t res
 
 LD_API ld_status ld_exec_resume_error(ld_exec* ex, const char* message)
 {
-    if (!ex || ex->status != LD_PENDING_TOOL || !ex->pending)
-        return misuse(ex);
+    if (!has_pending(ex))
+        return LD_ERROR;
     ex->pending = false;
     const ToolDef& tool = ex->rt->tools[ex->pending_tool];
     return resume_with_error(ex, "tools." + tool.name + ": " + (message ? message : "tool failed"));
@@ -304,13 +320,13 @@ LD_API ld_status ld_exec_resume_error(ld_exec* ex, const char* message)
 
 LD_API int ld_exec_pending(const ld_exec* ex, ld_call* out)
 {
-    if (!ex || !out || ex->status != LD_PENDING_TOOL || !ex->pending)
+    if (!out || !has_pending(ex))
         return 0;
     const ToolDef& tool = ex->rt->tools[ex->pending_tool];
     out->call_id = ex->pending_call_id;
     out->tool = tool.name.c_str();
-    out->args_json = ex->pending_args.data();
-    out->args_len = ex->pending_args.size();
+    out->args_json = ex->pending_args.data.get();
+    out->args_len = ex->pending_args.size;
     out->effect = tool.effect;
     return 1;
 }
@@ -324,8 +340,8 @@ LD_API const char* ld_exec_output(const ld_exec* ex, size_t* len)
         return nullptr;
     }
     if (len)
-        *len = ex->output.size();
-    return ex->output.c_str();
+        *len = ex->output.size;
+    return ex->output.data.get();
 }
 
 LD_API ld_error_kind ld_exec_error(const ld_exec* ex, const char** message)

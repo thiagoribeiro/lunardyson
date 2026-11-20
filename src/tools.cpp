@@ -11,12 +11,6 @@
 namespace
 {
 
-ld_exec* current_exec(lua_State* L)
-{
-    auto* rt = static_cast<ld_runtime*>(lua_callbacks(L)->userdata);
-    return rt ? rt->running : nullptr;
-}
-
 [[noreturn]] void fail(lua_State* L, ld_exec* ex, ld_error_kind kind, const std::string& msg)
 {
     if (ex)
@@ -26,7 +20,7 @@ ld_exec* current_exec(lua_State* L)
 
 int tool_call(lua_State* L)
 {
-    ld_exec* ex = current_exec(L);
+    ld_exec* ex = ld_running(L);
     size_t index = size_t(lua_tonumber(L, lua_upvalueindex(1)));
     if (!ex)
         luaL_error(L, "tools can only be called during an execution");
@@ -43,9 +37,13 @@ int tool_call(lua_State* L)
         fail(L, ex, LD_ERR_EFFECT_BUDGET,
              "effect budget exceeded by " + tool.name + " (max " + std::to_string(effect_limit) + ")");
 
-    std::string args, err;
+    JsonBuf args;
+    std::string err;
     if (lua_gettop(L) == 0 || lua_isnil(L, 1))
-        args = "{}";
+    {
+        args.data.reset(strdup("{}"));
+        args.size = 2;
+    }
     else if (!ld_json_encode(L, 1, &args, &err))
         luaL_error(L, "tools.%s: argument is not JSON-serializable: %s", tool.name.c_str(), err.c_str());
 
@@ -64,7 +62,7 @@ int unknown_tool(lua_State* L)
     const char* prefix = lua_tostring(L, lua_upvalueindex(1));
     const char* key = lua_isstring(L, 2) ? lua_tostring(L, 2) : "?";
     std::string name = std::string(prefix) + key;
-    fail(L, current_exec(L), LD_ERR_UNKNOWN_TOOL, "unknown tool: " + name + " (not registered)");
+    fail(L, ld_running(L), LD_ERR_UNKNOWN_TOOL, "unknown tool: " + name + " (not registered)");
 }
 
 // Locks the table at `idx`: unknown keys raise, metatable is hidden and frozen.
