@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LunarDyson — run untrusted Luau that orchestrates tools</title>
+  <meta name="description" content="LunarDyson is an execution runtime for untrusted, often LLM-generated Luau programs. Default deny, type-checked against the host's tools, metered memory, time, tool calls and effects. C ABI with Python and Go bindings.">
+  <meta property="og:title" content="LunarDyson">
+  <meta property="og:description" content="Run untrusted Luau programs that can only reach the world through the tools you register — and only within budget.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #07090f;
+      --card: #0f1420;
+      --card-2: #121a29;
+      --border: #222c3f;
+      --text: #e6ebf3;
+      --muted: #94a0b4;
+      --moon: #c8d4e6;
+      --accent: #8fb8ff;
+      --accent-soft: rgba(143, 184, 255, 0.12);
+      --green: #7fd88a;
+      --red: #ff8a8a;
+      --amber: #e7b65c;
+      --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(900px 500px at 85% -10%, rgba(143,184,255,0.10), transparent 60%),
+        radial-gradient(700px 400px at 0% 0%, rgba(200,212,230,0.06), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .container { width: min(1120px, calc(100% - 32px)); margin: 0 auto; }
+    header {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(7,9,15,0.82); backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .nav { display: flex; justify-content: space-between; align-items: center; padding: 18px 0; gap: 16px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: 0.08em; color: var(--text); }
+    .brand:hover { text-decoration: none; }
+    .nav-links { display: flex; gap: 22px; font-size: 14px; }
+    .nav-links a { color: var(--muted); }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+
+    .hero { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 56px; align-items: center; padding: 84px 0 72px; }
+    .eyebrow {
+      display: inline-block; color: var(--accent); background: var(--accent-soft);
+      border: 1px solid rgba(143,184,255,0.25); padding: 6px 12px; border-radius: 999px;
+      font-size: 13px; font-weight: 600; margin-bottom: 20px;
+    }
+    h1 { font-size: clamp(40px, 6vw, 68px); line-height: 1.0; letter-spacing: -0.045em; margin: 0 0 22px; }
+    h1 .dim { color: var(--muted); }
+    .lead { font-size: 19px; color: var(--muted); max-width: 600px; margin: 0; }
+    .lead strong { color: var(--text); font-weight: 600; }
+    .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 30px; }
+    .btn { padding: 12px 18px; border-radius: 12px; font-weight: 700; border: 1px solid transparent; }
+    .btn:hover { text-decoration: none; transform: translateY(-1px); }
+    .btn.primary { background: var(--moon); color: #0b0f17; }
+    .btn.secondary { border-color: var(--border); color: var(--text); background: rgba(255,255,255,0.03); }
+    .status { margin-top: 18px; font-size: 13px; color: var(--muted); }
+
+    /* sphere diagram */
+    .sphere-wrap { display: grid; place-items: center; }
+    .sphere-wrap svg { width: 100%; max-width: 460px; height: auto; }
+
+    section { padding: 72px 0; border-top: 1px solid rgba(255,255,255,0.06); }
+    h2 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -0.035em; line-height: 1.1; margin: 0 0 14px; }
+    .section-lead { color: var(--muted); font-size: 17px; max-width: 760px; margin: 0 0 34px; }
+    .grid { display: grid; gap: 16px; }
+    .g3 { grid-template-columns: repeat(3, 1fr); }
+    .g2 { grid-template-columns: repeat(2, 1fr); }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 22px; }
+    .card h3 { margin: 0 0 8px; font-size: 17px; }
+    .card p { margin: 0; color: var(--muted); font-size: 15px; }
+    .card code, p code, li code, td code { font-family: var(--mono); font-size: 0.88em; color: var(--moon); background: rgba(255,255,255,0.05); padding: 1px 5px; border-radius: 5px; }
+
+    .split { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 40px; align-items: start; }
+    pre {
+      margin: 0; background: #0a0e17; border: 1px solid var(--border); border-radius: 16px;
+      padding: 18px 20px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.6; color: #d4ddea;
+    }
+    .k { color: #c792ea; } .s { color: #a5d6a7; } .c { color: #66748a; } .f { color: var(--accent); } .n { color: var(--amber); }
+
+    .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+    .steps li { counter-increment: s; position: relative; padding: 14px 16px 14px 52px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; color: var(--muted); font-size: 15px; }
+    .steps li::before {
+      content: counter(s); position: absolute; left: 14px; top: 13px; width: 26px; height: 26px; border-radius: 50%;
+      display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #0b0f17; background: var(--moon);
+    }
+    .steps li strong { color: var(--text); }
+
+    .tabs { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+    .tab { font: 600 13px Inter, sans-serif; color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+    .tab[aria-selected="true"] { color: #0b0f17; background: var(--moon); border-color: var(--moon); }
+    .panel[hidden] { display: none; }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 620px; }
+    th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.05); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; background: var(--card-2); }
+    tr:last-child td { border-bottom: none; }
+    td:first-child { color: var(--text); font-weight: 600; }
+    td { color: var(--muted); }
+    .good { color: var(--green); font-weight: 700; }
+    .warn { color: var(--amber); font-weight: 700; }
+
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 18px; }
+    .stat .num { font-size: 32px; font-weight: 800; letter-spacing: -0.03em; color: var(--moon); }
+    .stat .lbl { color: var(--muted); font-size: 13px; }
+    .note { color: var(--muted); font-size: 13px; max-width: 900px; }
+
+    ul.plain { margin: 0; padding-left: 18px; color: var(--muted); }
+    ul.plain li { margin: 6px 0; }
+    ul.plain strong { color: var(--text); }
+
+    footer { padding: 34px 0; border-top: 1px solid rgba(255,255,255,0.06); color: var(--muted); font-size: 14px; }
+    footer .row { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+    @media (max-width: 900px) {
+      .hero, .split { grid-template-columns: 1fr; gap: 32px; }
+      .g3, .g2 { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .nav-links a:not(.keep) { display: none; }
+      .hero { padding-top: 48px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container nav">
+      <a class="brand" href="#top">
+        <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+          <circle cx="13" cy="13" r="11.5" fill="none" stroke="#8fb8ff" stroke-width="1" stroke-dasharray="2 2.4"/>
+          <circle cx="13" cy="13" r="6" fill="#c8d4e6"/>
+          <circle cx="10.6" cy="11.4" r="1.2" fill="#9aa6ba"/>
+          <circle cx="14.6" cy="14.8" r="0.9" fill="#9aa6ba"/>
+        </svg>
+        LUNARDYSON
+      </a>
+      <nav class="nav-links">
+        <a href="#why">Why</a>
+        <a href="#how">How it works</a>
+        <a href="#security">Security</a>
+        <a href="#numbers">Numbers</a>
+        <a class="keep" href="https://github.com/thiagoribeiro/lunardyson">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <div class="container hero">
+      <div>
+        <span class="eyebrow">Execution runtime for untrusted Luau</span>
+        <h1>Let the model write the program.<br><span class="dim">Decide what it can touch.</span></h1>
+        <p class="lead">
+          A host hands LunarDyson a small program, usually written by an LLM. It runs in a sandboxed
+          <a href="https://luau.org">Luau</a> VM and can reach the outside world <strong>only through the
+          tools the host registered</strong>, each with its own budget. It is type-checked against those
+          tools before it runs, and everything it does is metered.
+        </p>
+        <div class="actions">
+          <a class="btn primary" href="https://github.com/thiagoribeiro/lunardyson">View on GitHub</a>
+          <a class="btn secondary" href="#how">How it works</a>
+        </div>
+        <p class="status">v0.1 · C ABI with Python and Go bindings · Apache-2.0 · in production as the script runtime of <a href="https://ritesmith.run">RiteSmith</a></p>
+      </div>
+
+      <div class="sphere-wrap" aria-hidden="true">
+        <svg viewBox="0 0 460 420" role="img">
+          <defs>
+            <radialGradient id="moon" cx="40%" cy="38%" r="65%">
+              <stop offset="0%" stop-color="#e9eef6"/>
+              <stop offset="70%" stop-color="#aeb9cb"/>
+              <stop offset="100%" stop-color="#7d889b"/>
+            </radialGradient>
+            <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="rgba(143,184,255,0.18)"/>
+              <stop offset="100%" stop-color="rgba(143,184,255,0)"/>
+            </radialGradient>
+          </defs>
+          <circle cx="230" cy="210" r="200" fill="url(#glow)"/>
+          <circle cx="230" cy="210" r="150" fill="none" stroke="#2c3a55" stroke-width="18" opacity="0.55"/>
+          <circle cx="230" cy="210" r="150" fill="none" stroke="#8fb8ff" stroke-width="1.2" stroke-dasharray="6 7" opacity="0.8"/>
+          <circle cx="230" cy="210" r="78" fill="url(#moon)"/>
+          <circle cx="205" cy="188" r="12" fill="#97a3b7" opacity="0.7"/>
+          <circle cx="256" cy="232" r="8" fill="#97a3b7" opacity="0.6"/>
+          <circle cx="248" cy="178" r="5" fill="#97a3b7" opacity="0.6"/>
+          <text x="230" y="214" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" fill="#1b2230">run(input, ctx)</text>
+          <!-- gates -->
+          <g font-family="JetBrains Mono, monospace" font-size="11.5">
+            <rect x="302" y="78" width="132" height="28" rx="8" fill="#0f1420" stroke="#8fb8ff"/>
+            <text x="368" y="96" text-anchor="middle" fill="#c8d4e6">tools.crm.get</text>
+            <line x1="330" y1="106" x2="306" y2="128" stroke="#8fb8ff" stroke-width="1.2"/>
+            <rect x="318" y="300" width="128" height="28" rx="8" fill="#0f1420" stroke="#8fb8ff"/>
+            <text x="382" y="318" text-anchor="middle" fill="#c8d4e6">tools.mail.send</text>
+            <line x1="338" y1="300" x2="316" y2="282" stroke="#8fb8ff" stroke-width="1.2"/>
+            <rect x="8" y="30" width="104" height="28" rx="8" fill="#140f12" stroke="#ff8a8a" opacity="0.9"/>
+            <text x="60" y="48" text-anchor="middle" fill="#ff8a8a">os · io · net</text>
+            <text x="60" y="74" text-anchor="middle" fill="#94a0b4" font-size="10.5">do not exist</text>
+            <text x="230" y="392" text-anchor="middle" fill="#94a0b4" font-size="11">memory · VM time · calls per tool · effects</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+
+    <section id="why">
+      <div class="container">
+        <h2>One program instead of a tool loop</h2>
+        <p class="section-lead">
+          Agents usually orchestrate tools one model call at a time: <code>LLM → tool → LLM → tool → …</code>.
+          Every step pays latency and tokens, and the path can change between runs. Asking the model for one
+          small program and executing it deterministically is cheaper and repeatable. The catch is that you
+          are now running code nobody reviewed. LunarDyson is built for exactly that.
+        </p>
+        <div class="grid g3">
+          <div class="card">
+            <h3>Default deny</h3>
+            <p>No <code>os</code>, <code>io</code>, <code>debug</code>, <code>require</code>, <code>load*</code>,
+              <code>getfenv</code>, <code>coroutine</code>. A tool the host did not register does not exist in the
+              program's environment.</p>
+          </div>
+          <div class="card">
+            <h3>Checked before it runs</h3>
+            <p><code>ld_check</code> type-checks the program against the registered tool signatures with Luau's
+              analyzer, strict or nonstrict. Using a result without checking its error, or a wrong field, fails
+              here, without running anything.</p>
+          </div>
+          <div class="card">
+            <h3>Metered, and violations stick</h3>
+            <p>Memory, VM time, calls and response bytes per tool, and calls per effect class:
+              <code>pure</code>, <code>read</code>, <code>write</code>, <code>external_write</code>,
+              <code>money</code>. <code>pcall</code> cannot swallow a violation.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="how">
+      <div class="container split">
+        <div>
+          <h2>The step API</h2>
+          <p class="section-lead">
+            There are no callbacks across the ABI. Execution stops at every tool call and hands control
+            back to the host, so the same loop works for sync, async and remote tools, in any language.
+          </p>
+          <ol class="steps">
+            <li><strong>Register tools</strong> with a Luau signature, an effect class and budgets.</li>
+            <li><strong>Check</strong> the program against those signatures (optional, recommended for generated code).</li>
+            <li><strong>Start</strong> the execution with a JSON input. It runs until it finishes, fails, or calls a tool.</li>
+            <li><strong>Resume</strong> with the tool's JSON result (or an error). Each call carries a sequential
+              <code>call_id</code>, the hook for effect journaling and replay.</li>
+            <li><strong>Read</strong> the output, or a typed error kind: timeout, memory, budget, unknown tool, runtime error.</li>
+          </ol>
+        </div>
+
+        <div>
+          <div class="tabs" role="tablist">
+            <button class="tab" role="tab" aria-selected="true" data-p="py">Python</button>
+            <button class="tab" role="tab" aria-selected="false" data-p="c">C</button>
+            <button class="tab" role="tab" aria-selected="false" data-p="luau">The program</button>
+          </div>
+          <div class="panel" id="p-py">
+<pre><span class="k">import</span> lunardyson <span class="k">as</span> ld
+
+rt = ld.Runtime(memory_mb=<span class="n">16</span>, cpu_time_ms=<span class="n">1000</span>,
+                max_effects={<span class="s">"money"</span>: <span class="n">0</span>})
+rt.declare_types(<span class="s">"type Customer = { ok: true, name: string }"</span>
+                 <span class="s">" | { ok: false, error: string }"</span>)
+rt.tool(<span class="s">"crm.get"</span>, crm_get,
+        signature=<span class="s">"(args: { id: string }) -&gt; Customer"</span>,
+        max_calls=<span class="n">20</span>)
+
+diagnostics = rt.check(source, strict=<span class="k">True</span>)
+result = rt.execute(source, {<span class="s">"id"</span>: <span class="s">"c1"</span>})
+<span class="c"># Result(ok, output, error_kind, message, stats)</span></pre>
+          </div>
+          <div class="panel" id="p-c" hidden>
+<pre>ld_runtime* rt = <span class="f">ld_runtime_new</span>(NULL);  <span class="c">// 16 MiB, 1000 ms</span>
+<span class="f">ld_tool_register</span>(rt, <span class="s">"crm.get"</span>,
+    <span class="s">"(args: { id: string }) -&gt; Customer"</span>,
+    LD_EFFECT_READ, <span class="n">20</span>, <span class="n">64</span> * <span class="n">1024</span>);
+
+ld_exec* ex;
+ld_status st = <span class="f">ld_exec_start</span>(rt, src, len, <span class="s">"{\"id\":\"c1\"}"</span>, NULL, &amp;ex);
+<span class="k">while</span> (st == LD_PENDING_TOOL) {
+    ld_call call; <span class="f">ld_exec_pending</span>(ex, &amp;call);
+    <span class="c">// call.call_id, call.tool, call.args_json</span>
+    st = <span class="f">ld_exec_resume</span>(ex, result_json, result_len);
+}
+<span class="c">// LD_DONE → ld_exec_output()   LD_ERROR → ld_exec_error()</span>
+<span class="f">ld_exec_free</span>(ex);</pre>
+          </div>
+          <div class="panel" id="p-luau" hidden>
+<pre><span class="c">--!strict</span>
+<span class="k">function</span> <span class="f">run</span>(input: Input, context: Context): Output
+  <span class="k">local</span> c = tools.crm.<span class="f">get</span>({ id = input.id })
+  <span class="k">if not</span> c.ok <span class="k">then</span>
+    <span class="k">return</span> { error = c.error }
+  <span class="k">end</span>
+  <span class="k">return</span> { greeting = <span class="s">"Hello, "</span> .. c.name }
+<span class="k">end</span>
+
+<span class="c">-- Reading c.name before checking c.ok is a type error:
+-- ld_check rejects it before the program ever runs.</span></pre>
+          </div>
+          <p class="note" style="margin-top:12px;">
+            The program defines a global <code>run(input, context)</code> and returns a plain table, serialized
+            to JSON. Go has the same shape: <code>NewRuntime</code>, <code>Tool</code>, <code>Check</code>,
+            <code>Execute</code>, <code>Start</code>/<code>Resume</code>. The whole C ABI is 18 functions.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="security">
+      <div class="container">
+        <h2>What it guarantees, and how that is tested</h2>
+        <p class="section-lead">
+          Every control has a conformance case. The same 32-case attack and contract suite runs in every binding,
+          and the core is built and run under ASan, UBSan, LeakSanitizer and ThreadSanitizer.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Threat</th><th>Control</th><th>Tested by</th></tr></thead>
+            <tbody>
+              <tr><td>Host access (files, processes, env, network)</td><td>None of it exists in the VM; dangerous globals are removed</td><td><code>sandbox_escape_globals_absent</code></td></tr>
+              <tr><td>Hostile bytecode</td><td>Source only, compiled by LunarDyson; bytecode is never accepted</td><td>ABI design</td></tr>
+              <tr><td>Tampering with builtins or tools</td><td>Read-only builtins; <code>tools</code> tables read-only with a locked metatable</td><td><code>builtin_mutation</code>, <code>tools_*</code></td></tr>
+              <tr><td>State leaking between executions</td><td>One sandboxed thread with its own globals per execution</td><td><code>global_mutation_isolated_between_executions</code></td></tr>
+              <tr><td>CPU exhaustion</td><td>VM-time deadline; a watchdog arms the interrupt, which re-fires at every safepoint</td><td><code>infinite_loop*</code>, <code>timeout_swallowed_by_pcall</code></td></tr>
+              <tr><td>Memory exhaustion</td><td>Budgeted allocator</td><td><code>memory_bomb_*</code>, <code>huge_table</code></td></tr>
+              <tr><td>Calling what was not granted</td><td>Unregistered tools do not exist</td><td><code>unauthorized_*</code></td></tr>
+              <tr><td>Abusing granted tools</td><td>Per-tool calls and response bytes; per-effect-class budgets</td><td><code>tool_call_bomb</code>, <code>effect_budget_*</code></td></tr>
+              <tr><td>Swallowing a violation</td><td>Violations are sticky: the execution fails even if the program recovers</td><td><code>*_swallowed_by_pcall</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="grid g2" style="margin-top:16px;">
+          <div class="card">
+            <h3>What it does not promise</h3>
+            <ul class="plain">
+              <li><strong>No process isolation yet.</strong> The runtime lives in the host process; a memory-safety bug in it or in Luau would take the host down. For hostile workloads, run it in a worker process or container. A worker pool and <code>lunardyson-server</code> are on the roadmap.</li>
+              <li><strong>Tools are the host's job.</strong> LunarDyson counts and limits calls; what a tool does (SSRF checks, authorization, idempotency) is up to the host.</li>
+              <li><strong>Timing side channels</strong> are out of scope.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Why Luau, upstream and pinned</h3>
+            <ul class="plain">
+              <li><strong>Gradual types</strong> let generated code be checked against tool signatures before it runs.</li>
+              <li><strong>Built for sandboxing:</strong> read-only builtins, interrupts, a pluggable allocator.</li>
+              <li><strong>No fork.</strong> Luau is a pinned submodule, so the language saved programs are written in does not drift. LunarDyson is the shell around it.</li>
+              <li><strong>It is Luau, not Lua:</strong> Lua 5.x code will not run unchanged.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="numbers">
+      <div class="container">
+        <h2>Numbers</h2>
+        <p class="section-lead">
+          Measured in the v0.1 spike (September 2026) against lupa, the Lua 5.x sandbox it replaced in RiteSmith.
+          Medians, engines interleaved per iteration.
+        </p>
+        <div class="stats">
+          <div class="card stat"><div class="num">32/32</div><div class="lbl">conformance cases pass in Python and in Go, on x86_64 and arm64</div></div>
+          <div class="card stat"><div class="num">200.1 ms</div><div class="lbl">to stop an infinite loop with a 200 ms budget, also under <code>pcall</code></div></div>
+          <div class="card stat"><div class="num">25/25</div><div class="lbl">RiteSmith reference programs run and are strict-clean</div></div>
+          <div class="card stat"><div class="num">~2×</div><div class="lbl">faster per execution than the sandbox path RiteSmith ran before, on a Cortex-A53</div></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Per execution, relative to lupa</th><th>x86_64</th><th>Cortex-A53 (Orange Pi Zero 3)</th></tr></thead>
+            <tbody>
+              <tr><td>Empty run</td><td class="good">0.43×</td><td class="good">0.96× (1.02 ms)</td></tr>
+              <tr><td>1 tool call</td><td class="good">0.60×</td><td class="warn">1.12×</td></tr>
+              <tr><td>13 tool calls</td><td class="good">0.98×</td><td class="warn">1.30× (3.3 ms)</td></tr>
+              <tr><td>CPU: 200k loop iterations</td><td>1.01×</td><td class="warn">1.26×</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note" style="margin-top:12px;">
+          Lower is better. On the A53, each tool call costs ~50 µs extra in the Python binding's JSON encode and
+          decode, negligible next to real tool latency; pure-CPU code loses to Lua 5.5's native integers, and
+          Luau's native codegen is the lever there. In RiteSmith, a 450-sample generation benchmark showed models
+          write Luau that passes tests at the same rate as Lua, so the switch cost nothing in generation quality.
+          <a href="https://github.com/thiagoribeiro/lunardyson/blob/main/SPIKE.md">Full spike report</a>.
+        </p>
+      </div>
+    </section>
+
+    <section id="ritesmith">
+      <div class="container split">
+        <div>
+          <h2>Where it runs today</h2>
+          <p class="section-lead">
+            <a href="https://ritesmith.run">RiteSmith</a> turns intents into Trama workflows and Luau scripts.
+            Every generated script is type-checked by LunarDyson against the tool signatures derived from
+            RiteSmith's capability contracts, run against its test cases, and executed in LunarDyson in production
+            with memory, time, tool and effect budgets.
+          </p>
+          <div class="actions">
+            <a class="btn primary" href="https://ritesmith.run">Explore RiteSmith</a>
+            <a class="btn secondary" href="https://github.com/thiagoribeiro/lunardyson#build">Build from source</a>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Roadmap</h3>
+          <ul class="plain">
+            <li>Isolation tiers: a worker process pool and <code>lunardyson-server</code></li>
+            <li>Faster tool path in the Python binding, or a zero-copy value API</li>
+            <li>Optional native codegen for CPU-bound programs</li>
+            <li>A GC policy without a full collection per execution</li>
+            <li>Wheels for x86_64 and aarch64, fuzzing in CI</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="name">
+      <div class="container">
+        <h2>The name</h2>
+        <p class="section-lead" style="margin-bottom:0;">
+          <em>Lua</em> is Portuguese for "moon", and a Dyson sphere is a shell built around a star to capture all of
+          its output. LunarDyson is a shell built around the moon. The moon stays untouched: Luau is used upstream,
+          with no fork. Nothing leaves the sphere except through the shell, and the shell meters everything that
+          crosses it. And like the moon, a LunarDyson program has no light of its own: it only works with what the
+          host shines on it through tools.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container row">
+      <span>LunarDyson · Apache License 2.0</span>
+      <span><a href="https://github.com/thiagoribeiro/lunardyson">GitHub</a> · <a href="https://ritesmith.run">RiteSmith</a> · <a href="https://trama.run">Trama</a></span>
+    </div>
+  </footer>
+
+  <script>
+    document.querySelectorAll('.tab').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        document.querySelectorAll('.tab').forEach(function (t) { t.setAttribute('aria-selected', String(t === tab)); });
+        document.querySelectorAll('.panel').forEach(function (p) { p.hidden = p.id !== 'p-' + tab.dataset.p; });
+      });
+    });
+  </script>
+</body>
+</html>
