@@ -26,12 +26,6 @@ const luaL_Reg kLibs[] = {
     {nullptr, nullptr},
 };
 
-// Removed from the base library (environment access, GC control, host I/O).
-const char* const kHiddenGlobals[] = {
-    "getfenv", "setfenv", "loadstring", "load", "require", "newproxy", "gcinfo", "collectgarbage", "os", "debug",
-    "coroutine", "io", "package", "dofile", "loadfile",
-};
-
 int print_noop(lua_State*)
 {
     return 0; // the host's stdout is not the program's to write to

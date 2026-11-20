@@ -5,10 +5,30 @@
 #include "lua.h"
 
 #include <chrono>
+#include <cstdlib>
+#include <memory>
 #include <string>
 #include <vector>
 
 struct Checker;
+
+// Globals the program must not see: removed from the VM (runtime.cpp) and from the
+// analyzer's global scope (check.cpp), so `check` and `execute` agree.
+inline constexpr const char* kHiddenGlobals[] = {
+    "getfenv", "setfenv", "loadstring", "load", "require", "newproxy", "gcinfo", "collectgarbage", "os", "debug",
+    "coroutine", "io", "package", "dofile", "loadfile", "buffer", "vector",
+};
+
+// A JSON document written by yyjson (malloc'd), owned as-is instead of copied into a std::string.
+struct JsonBuf
+{
+    struct Free
+    {
+        void operator()(char* p) const { free(p); }
+    };
+    std::unique_ptr<char, Free> data;
+    size_t size = 0;
+};
 
 struct AllocState
 {
@@ -56,7 +76,7 @@ struct ld_exec
     ld_status status = LD_ERROR;
     ld_error_kind error = LD_ERR_NONE;
     std::string message;
-    std::string output;
+    JsonBuf output;
     std::string input_json;
     std::string context_json;
 
@@ -64,7 +84,7 @@ struct ld_exec
     bool pending = false;
     size_t pending_tool = 0;
     uint64_t pending_call_id = 0;
-    std::string pending_args;
+    JsonBuf pending_args;
 
     // Budget accounting
     uint64_t next_call_id = 1;
@@ -82,13 +102,22 @@ struct ld_exec
     size_t peak_bytes = 0;
 };
 
+// The execution currently inside lua_resume on L's runtime, if any.
+inline ld_exec* ld_running(lua_State* L)
+{
+    auto* rt = static_cast<ld_runtime*>(lua_callbacks(L)->userdata);
+    return rt ? rt->running : nullptr;
+}
+
 // alloc.cpp
 void* ld_alloc(void* ud, void* ptr, size_t osize, size_t nsize);
 
 // json.cpp — push decoded JSON onto the stack (returns false and sets *err on failure)
 bool ld_json_push(lua_State* L, const char* json, size_t len, std::string* err);
 // encode the value at `idx`; returns false and sets *err on failure
-bool ld_json_encode(lua_State* L, int idx, std::string* out, std::string* err);
+bool ld_json_encode(lua_State* L, int idx, JsonBuf* out, std::string* err);
+// True when s[0..len) is well-formed UTF-8 (the common case: no copy needed).
+bool ld_utf8_valid(const char* s, size_t len);
 // Copy of s with every byte sequence that is not well-formed UTF-8 replaced by U+FFFD.
 // JSON output must be valid UTF-8 (yyjson refuses to write anything else), but Luau
 // strings, and analyzer messages quoting the source, are arbitrary bytes.

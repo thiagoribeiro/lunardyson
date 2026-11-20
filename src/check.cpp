@@ -20,12 +20,6 @@ namespace
 
 const char* const kModule = "program";
 
-// Must mirror the globals removed from the runtime (runtime.cpp).
-const char* const kHiddenGlobals[] = {
-    "getfenv", "setfenv", "loadstring", "load", "require", "newproxy", "gcinfo", "collectgarbage", "os", "debug",
-    "coroutine", "io", "package", "dofile", "loadfile", "buffer", "vector",
-};
-
 struct MemoryFileResolver : Luau::FileResolver
 {
     std::string source;
@@ -46,6 +40,12 @@ struct Diagnostic
     std::string severity; // "error" | "lint"
     std::string message;
 };
+
+Diagnostic at(const Luau::Location& loc, std::string kind, std::string severity, std::string message)
+{
+    return {int(loc.begin.line + 1), int(loc.begin.column + 1), std::move(kind), std::move(severity),
+            std::move(message)};
+}
 
 // Only exported aliases of a definition file reach the global scope, so hosts
 // may write plain `type X = ...` and we export it for them.
@@ -150,12 +150,10 @@ struct Checker
             if (!r.success)
             {
                 for (const Luau::ParseError& e : r.parseResult.errors)
-                    definition_errors.push_back({int(e.getLocation().begin.line + 1), int(e.getLocation().begin.column + 1),
-                                                 "DefinitionError", "error", e.getMessage()});
+                    definition_errors.push_back(at(e.getLocation(), "DefinitionError", "error", e.getMessage()));
                 if (r.module)
                     for (const Luau::TypeError& e : r.module->errors)
-                        definition_errors.push_back({int(e.location.begin.line + 1), int(e.location.begin.column + 1),
-                                                     "DefinitionError", "error", Luau::toString(e)});
+                        definition_errors.push_back(at(e.location, "DefinitionError", "error", Luau::toString(e)));
             }
         }
 
@@ -178,7 +176,7 @@ struct Checker
         std::vector<Diagnostic> out = definition_errors;
         for (const Luau::TypeError& e : result.errors)
         {
-            Diagnostic d{int(e.location.begin.line + 1), int(e.location.begin.column + 1), "TypeError", "error", ""};
+            Diagnostic d = at(e.location, "TypeError", "error", "");
             if (const auto* syntax = Luau::get_if<Luau::SyntaxError>(&e.data))
             {
                 d.kind = "SyntaxError";
@@ -192,8 +190,7 @@ struct Checker
         }
         for (const auto* bucket : {&result.lintResult.errors, &result.lintResult.warnings})
             for (const Luau::LintWarning& w : *bucket)
-                out.push_back({int(w.location.begin.line + 1), int(w.location.begin.column + 1),
-                               Luau::LintWarning::getName(w.code), "lint", w.text});
+                out.push_back(at(w.location, Luau::LintWarning::getName(w.code), "lint", w.text));
         return out;
     }
 };
