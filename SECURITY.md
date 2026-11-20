@@ -41,6 +41,15 @@ A crash reproducer becomes a conformance case or a smoke test together with its 
 - **Tools are the host's responsibility.** LunarDyson counts and limits tool calls,
   but what a tool does (SSRF checks, authorization, idempotency) is the host's job.
 - **Timing side channels** are out of scope.
+- **Out-of-range integer arguments to builtins are platform-dependent.** Library
+  functions that take an integer (`string.sub`, `string.rep`, `string.char`,
+  `table.insert`, …) convert the number with a plain `(int)` cast in Luau's
+  `lua_tointegerx`. For a value outside the `int` range (e.g. `string.sub(s, 1e15)`),
+  that cast is undefined behaviour in C++. It does not affect memory safety or the
+  budgets, but x86-64 and arm64 can return different results. Upstream considers it
+  known behaviour ([luau-lang/luau#3100](https://github.com/luau-lang/luau/issues/3100)),
+  and LunarDyson does not fork Luau. The fuzz runs suppress this single report
+  (`tests/fuzz/ubsan-suppressions.txt`) and treat any other UB as fatal.
 
 ## Thread safety of the timeout watchdog
 

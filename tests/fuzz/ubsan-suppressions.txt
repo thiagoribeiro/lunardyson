@@ -1,0 +1,5 @@
+# Known upstream Luau behaviour, not a LunarDyson bug: lua_tointegerx casts a double
+# outside the int range with a plain (int) cast (VM/src/lapi.cpp). Upstream considers it
+# known behaviour (luau-lang/luau#3100); we do not fork Luau. Scripts reach it through
+# luaL_checkinteger (string.sub/rep/char, table.insert, ...).
+float-cast-overflow:lapi.cpp
