@@ -89,6 +89,10 @@ void* ld_alloc(void* ud, void* ptr, size_t osize, size_t nsize);
 bool ld_json_push(lua_State* L, const char* json, size_t len, std::string* err);
 // encode the value at `idx`; returns false and sets *err on failure
 bool ld_json_encode(lua_State* L, int idx, std::string* out, std::string* err);
+// Copy of s with every byte sequence that is not well-formed UTF-8 replaced by U+FFFD.
+// JSON output must be valid UTF-8 (yyjson refuses to write anything else), but Luau
+// strings, and analyzer messages quoting the source, are arbitrary bytes.
+std::string ld_utf8_sanitize(const char* s, size_t len);
 
 // tools.cpp
 void ld_tools_install(ld_runtime* rt); // builds the read-only `tools` global (before sandboxing)

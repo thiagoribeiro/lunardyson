@@ -24,6 +24,17 @@ if(LD_TSAN)
     add_link_options(-fsanitize=thread)
 endif()
 
+# libFuzzer targets (clang only). Everything, Luau included, is built with coverage
+# instrumentation plus ASan/UBSan so the fuzzer sees inside the VM and the analyzer.
+option(LD_FUZZ "Build libFuzzer targets (requires clang)" OFF)
+if(LD_FUZZ)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "LD_FUZZ needs clang (set CC=clang CXX=clang++)")
+    endif()
+    add_compile_options(-fsanitize=fuzzer-no-link,address,undefined -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
 # Luau upstream, pinned by the submodule (no fork).
 set(LUAU_BUILD_CLI OFF CACHE BOOL "" FORCE)
 set(LUAU_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -69,4 +80,12 @@ option(LD_BUILD_TESTS "Build the C smoke test" ON)
 if(LD_BUILD_TESTS)
     add_executable(ld_smoke tests/c/smoke.c)
     target_link_libraries(ld_smoke PRIVATE lunardyson)
+endif()
+
+if(LD_FUZZ)
+    foreach(target fuzz_exec fuzz_check)
+        add_executable(${target} tests/fuzz/${target}.cc)
+        target_link_libraries(${target} PRIVATE lunardyson)
+        target_link_options(${target} PRIVATE -fsanitize=fuzzer)
+    endforeach()
 endif()

@@ -82,6 +82,18 @@ int main(void)
         ld_free(diags);
     }
 
+    /* Found by fuzz_check (exact input): the analyzer quotes the source in its messages,
+     * and bytes that are not UTF-8 made the JSON encoder fail, so ld_check returned NULL.
+     * It must always return a diagnostics array. */
+    {
+        static const char BAD[] = "furcnitno run() local t\x9e""\x9e""\x9e""textgs\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x22""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e"" { n = #t\x9e""\x9e""textgs\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x22""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e""\x9e"" { n  } end";
+        char* diags = ld_check(rt, BAD, sizeof(BAD) - 1, 1);
+        CHECK(diags, "check with invalid UTF-8 returns diagnostics, not NULL");
+        int is_array = diags[0] == '[';
+        ld_free(diags);
+        CHECK(is_array, "diagnostics are a JSON array");
+    }
+
     ld_runtime_free(rt);
     printf("ok\n");
     return 0;

@@ -21,6 +21,18 @@ guarantees, what it does not, and how those guarantees are tested.
 The full list is in `tests/conformance/cases.json`. It runs in every binding and
 under ASan/UBSan (`LD_SANITIZE=ON`).
 
+Two libFuzzer targets in `tests/fuzz/` complement the hand-written cases. CI runs them for
+60 seconds on every pull request, and for longer every night.
+- `fuzz_exec` runs arbitrary programs with arbitrary tool replies, and checks on every step:
+  - only registered tools reach the host, each with its declared effect;
+  - `call_id`s are sequential;
+  - per-tool and per-effect budgets hold;
+  - memory and VM time stay within budget;
+  - every error has a known kind.
+- `fuzz_check` feeds arbitrary source to the type checker.
+
+A crash reproducer becomes a conformance case or a smoke test together with its fix.
+
 ## Non-guarantees
 
 - **No process isolation.** A memory-safety bug in LunarDyson or in Luau

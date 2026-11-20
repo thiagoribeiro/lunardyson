@@ -186,6 +186,17 @@
       "context": {"now": "2026-09-30T12:00:00Z"},
       "source": "function run(input, context) return { n = input.n * 2, first = input.tags[1], x = input.nested.x, now = context.now } end",
       "expect": {"output_equals": {"n": 6, "first": "a", "x": 1.5, "now": "2026-09-30T12:00:00Z"}}
+    },
+    {
+      "name": "invalid_utf8_output_is_replaced",
+      "source": "function run() return { s = string.char(200) .. \"ok\", [string.char(255)] = 1 } end",
+      "expect": {"output_equals": {"s": "\ufffdok", "\ufffd": 1}}
+    },
+    {
+      "name": "invalid_utf8_tool_args_are_replaced",
+      "tools": [{"name": "crm.get", "returns": {"ok": true}}],
+      "source": "function run() local r = tools.crm.get({ id = string.char(195) }) return { ok = r.ok } end",
+      "expect": {"output_equals": {"ok": true}, "tool_calls": 1}
     }
   ]
 }
