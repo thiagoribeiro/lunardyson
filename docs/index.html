@@ -72,7 +72,22 @@
 
     /* sphere diagram */
     .sphere-wrap { display: grid; place-items: center; }
-    .sphere-wrap svg { width: 100%; max-width: 460px; height: auto; }
+    .sphere-wrap svg { width: 100%; max-width: 460px; height: auto; overflow: visible; }
+    .spin-slow, .spin-fast, .spin-rev, .moon, #flash, .gate, .deny { transform-box: view-box; transform-origin: 230px 210px; }
+    .spin-slow { animation: spin 90s linear infinite; }
+    .spin-fast { animation: spin 9s linear infinite; }
+    .spin-rev  { animation: spin 140s linear infinite reverse; }
+    .halo { animation: breathe 6s ease-in-out infinite; transform-box: view-box; transform-origin: 230px 210px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes breathe { 0%,100% { opacity: 0.75; transform: scale(0.98); } 50% { opacity: 1; transform: scale(1.02); } }
+    .moon { transition: opacity 600ms ease, transform 700ms cubic-bezier(.2,.8,.2,1); }
+    .moon.out { opacity: 0; transform: scale(0.82); }
+    .gate rect, .deny rect { transition: fill 250ms ease, filter 250ms ease; }
+    .gate.lit rect { fill: #1a2a48; filter: drop-shadow(0 0 8px rgba(143,184,255,0.9)); }
+    .deny.hit rect { fill: #3a1418; filter: drop-shadow(0 0 8px rgba(255,138,138,0.9)); }
+    @media (prefers-reduced-motion: reduce) {
+      .spin-slow, .spin-fast, .spin-rev, .halo { animation: none; }
+    }
 
     section { padding: 72px 0; border-top: 1px solid rgba(255,255,255,0.06); }
     h2 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -0.035em; line-height: 1.1; margin: 0 0 14px; }
@@ -177,39 +192,81 @@
       </div>
 
       <div class="sphere-wrap" aria-hidden="true">
-        <svg viewBox="0 0 460 420" role="img">
+        <svg id="sphere" viewBox="0 0 460 420">
           <defs>
-            <radialGradient id="moon" cx="40%" cy="38%" r="65%">
-              <stop offset="0%" stop-color="#e9eef6"/>
-              <stop offset="70%" stop-color="#aeb9cb"/>
-              <stop offset="100%" stop-color="#7d889b"/>
-            </radialGradient>
             <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="rgba(143,184,255,0.18)"/>
+              <stop offset="0%" stop-color="rgba(143,184,255,0.20)"/>
               <stop offset="100%" stop-color="rgba(143,184,255,0)"/>
             </radialGradient>
+            <radialGradient id="moonfill" cx="38%" cy="36%" r="68%">
+              <stop offset="0%" stop-color="#eef2f8"/>
+              <stop offset="68%" style="stop-color: var(--moon-mid, #aeb9cb)"/>
+              <stop offset="100%" style="stop-color: var(--moon-edge, #7d889b)"/>
+            </radialGradient>
+            <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="4"/>
+            </filter>
           </defs>
-          <circle cx="230" cy="210" r="200" fill="url(#glow)"/>
+
+          <circle class="halo" cx="230" cy="210" r="200" fill="url(#glow)"/>
+
+          <!-- the shell -->
           <circle cx="230" cy="210" r="150" fill="none" stroke="#2c3a55" stroke-width="18" opacity="0.55"/>
-          <circle cx="230" cy="210" r="150" fill="none" stroke="#8fb8ff" stroke-width="1.2" stroke-dasharray="6 7" opacity="0.8"/>
-          <circle cx="230" cy="210" r="78" fill="url(#moon)"/>
-          <circle cx="205" cy="188" r="12" fill="#97a3b7" opacity="0.7"/>
-          <circle cx="256" cy="232" r="8" fill="#97a3b7" opacity="0.6"/>
-          <circle cx="248" cy="178" r="5" fill="#97a3b7" opacity="0.6"/>
-          <text x="230" y="214" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" fill="#1b2230">run(input, ctx)</text>
+          <g class="spin-slow">
+            <circle cx="230" cy="210" r="150" fill="none" stroke="#8fb8ff" stroke-width="1.2" stroke-dasharray="6 7" opacity="0.8"/>
+          </g>
+          <g class="spin-fast">
+            <circle cx="230" cy="210" r="150" fill="none" stroke="#8fb8ff" stroke-width="10" stroke-linecap="round"
+                    stroke-dasharray="90 852" opacity="0.55" filter="url(#soft)"/>
+            <circle cx="230" cy="210" r="150" fill="none" stroke="#dbe8ff" stroke-width="1.6" stroke-linecap="round"
+                    stroke-dasharray="70 872" opacity="0.9"/>
+          </g>
+          <g class="spin-rev">
+            <circle cx="230" cy="210" r="159" fill="none" stroke="#8fb8ff" stroke-width="0.8" stroke-dasharray="1 15" opacity="0.5"/>
+          </g>
+
+          <!-- block flash: the shell segment that was hit glows red -->
+          <g transform="rotate(213 230 210)">
+            <circle id="shield" cx="230" cy="210" r="150" fill="none" stroke="#ff8a8a" stroke-width="8" stroke-linecap="round"
+                    stroke-dasharray="70 872" opacity="0" filter="url(#soft)"/>
+          </g>
+          <!-- impact ripple, positioned by JS -->
+          <circle id="flash" cx="124" cy="104" r="4" fill="none" stroke="#ff8a8a" stroke-width="3" opacity="0"/>
+
+          <!-- the moon -->
+          <g id="moon" class="moon">
+            <circle cx="230" cy="210" r="78" fill="url(#moonfill)"/>
+            <g id="craters" fill="#97a3b7">
+              <circle cx="205" cy="188" r="12" opacity="0.7"/>
+              <circle cx="256" cy="232" r="8" opacity="0.6"/>
+              <circle cx="248" cy="178" r="5" opacity="0.6"/>
+            </g>
+            <text id="fn" x="230" y="214" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" fill="#1b2230">run(input, ctx)</text>
+          </g>
+
           <!-- gates -->
           <g font-family="JetBrains Mono, monospace" font-size="11.5">
-            <rect x="302" y="78" width="132" height="28" rx="8" fill="#0f1420" stroke="#8fb8ff"/>
-            <text x="368" y="96" text-anchor="middle" fill="#c8d4e6">tools.crm.get</text>
+            <g id="gate1" class="gate">
+              <rect x="294" y="78" width="148" height="28" rx="8" fill="#0f1420" stroke="#8fb8ff"/>
+              <text id="gate1-t" x="368" y="96" text-anchor="middle" fill="#c8d4e6">tools.crm.get</text>
+            </g>
             <line x1="330" y1="106" x2="306" y2="128" stroke="#8fb8ff" stroke-width="1.2"/>
-            <rect x="318" y="300" width="128" height="28" rx="8" fill="#0f1420" stroke="#8fb8ff"/>
-            <text x="382" y="318" text-anchor="middle" fill="#c8d4e6">tools.mail.send</text>
+            <g id="gate2" class="gate">
+              <rect x="306" y="300" width="152" height="28" rx="8" fill="#0f1420" stroke="#8fb8ff"/>
+              <text id="gate2-t" x="382" y="318" text-anchor="middle" fill="#c8d4e6">tools.mail.send</text>
+            </g>
             <line x1="338" y1="300" x2="316" y2="282" stroke="#8fb8ff" stroke-width="1.2"/>
-            <rect x="8" y="30" width="104" height="28" rx="8" fill="#140f12" stroke="#ff8a8a" opacity="0.9"/>
-            <text x="60" y="48" text-anchor="middle" fill="#ff8a8a">os · io · net</text>
-            <text x="60" y="74" text-anchor="middle" fill="#94a0b4" font-size="10.5">do not exist</text>
+            <g id="deny" class="deny">
+              <rect x="8" y="30" width="104" height="28" rx="8" fill="#140f12" stroke="#ff8a8a" opacity="0.9"/>
+              <text id="deny-t" x="60" y="48" text-anchor="middle" fill="#ff8a8a">os · io · net</text>
+              <text x="60" y="74" text-anchor="middle" fill="#94a0b4" font-size="10.5">do not exist</text>
+            </g>
             <text x="230" y="392" text-anchor="middle" fill="#94a0b4" font-size="11">memory · VM time · calls per tool · effects</text>
           </g>
+
+          <!-- packets -->
+          <circle id="pkt" r="4.5" fill="#dbe8ff" opacity="0"/>
+          <circle id="pkt-back" r="3.5" fill="#7fd88a" opacity="0"/>
         </svg>
       </div>
     </div>
@@ -452,6 +509,81 @@ ld_status st = <span class="f">ld_exec_start</span>(rt, src, len, <span class="s
   </footer>
 
   <script>
+
+    (function () {
+      var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var svg = document.getElementById('sphere');
+      if (!svg || reduce || !svg.animate) return;
+      var $ = function (id) { return document.getElementById(id); };
+      var moon = $('moon'), fn = $('fn'), craters = $('craters'), pkt = $('pkt'), back = $('pkt-back'), flash = $('flash');
+      var C = { x: 230, y: 210 };
+      var G1 = { from: [282, 158], to: [306, 128] }, G2 = { from: [284, 264], to: [316, 282] };
+      var programs = [
+        { fn: 'run(order)', g1: 'tools.crm.get', g2: 'tools.mail.send', deny: null, tint: ['#aeb9cb', '#7d889b'] },
+        { fn: 'watch_price()', g1: 'tools.market.price', g2: 'tools.telegram.send', deny: 'io.open(...)', tint: ['#b9c2d6', '#7f8aa5'] },
+        { fn: 'summarize(inbox)', g1: 'tools.email.search', g2: 'tools.report.write', deny: 'os.execute(...)', tint: ['#c4c0b4', '#8d877a'] },
+        { fn: 'water_plants()', g1: 'tools.sensor.read', g2: 'tools.valve.open', deny: 'http.get(...)', tint: ['#b4c6c4', '#76908c'] }
+      ];
+      var i = 0, timers = [];
+      var later = function (ms, f) { timers.push(setTimeout(f, ms)); };
+      function travel(el, a, b, ms) {
+        el.setAttribute('opacity', '1');
+        return el.animate([{ transform: 'translate(' + a[0] + 'px,' + a[1] + 'px)', opacity: 0.2 },
+                           { transform: 'translate(' + a[0] + 'px,' + a[1] + 'px)', opacity: 1, offset: 0.1 },
+                           { transform: 'translate(' + b[0] + 'px,' + b[1] + 'px)', opacity: 1 }],
+                          { duration: ms, easing: 'ease-in', fill: 'forwards' });
+      }
+      function hide(el) { el.getAnimations().forEach(function (a) { a.cancel(); }); el.setAttribute('opacity', '0'); }
+      function call(g, gateId) {
+        var a = travel(pkt, g.from, g.to, 520);
+        a.onfinish = function () {
+          hide(pkt);
+          $(gateId).classList.add('lit');
+          later(520, function () {
+            $(gateId).classList.remove('lit');
+            var r = travel(back, g.to, g.from, 420);
+            r.onfinish = function () { hide(back); };
+          });
+        };
+      }
+      function blocked(label) {
+        $('deny-t').textContent = label;
+        var hitX = C.x - 106, hitY = C.y - 106;
+        var a = travel(pkt, [C.x - 52, C.y - 52], [hitX, hitY], 480);
+        a.onfinish = function () {
+          hide(pkt);
+          flash.setAttribute('cx', hitX); flash.setAttribute('cy', hitY);
+          flash.animate([{ r: 4, opacity: 0.95, strokeWidth: 3 }, { r: 34, opacity: 0, strokeWidth: 0.5 }],
+                        { duration: 700, easing: 'ease-out' });
+          flash.animate([{ opacity: 0.95 }, { opacity: 0 }], { duration: 700 });
+          $('shield').animate([{ opacity: 0 }, { opacity: 0.95, offset: 0.15 }, { opacity: 0 }], { duration: 900, easing: 'ease-out' });
+          $('deny').classList.add('hit');
+          later(600, function () { $('deny').classList.remove('hit'); $('deny-t').textContent = 'os · io · net'; });
+        };
+      }
+      function cycle() {
+        var p = programs[i++ % programs.length];
+        fn.textContent = p.fn;
+        $('gate1-t').textContent = p.g1;
+        $('gate2-t').textContent = p.g2;
+        svg.style.setProperty('--moon-mid', p.tint[0]);
+        svg.style.setProperty('--moon-edge', p.tint[1]);
+        craters.setAttribute('transform', 'rotate(' + (i * 97 % 360) + ' 230 210)');
+        moon.classList.remove('out');
+        later(900, function () { call(G1, 'gate1'); });
+        if (p.deny) later(2500, function () { blocked(p.deny); });
+        later(p.deny ? 3500 : 2600, function () { call(G2, 'gate2'); });
+        later(5000, function () { moon.classList.add('out'); });
+        later(5800, cycle);
+      }
+      document.addEventListener('visibilitychange', function () {
+        timers.forEach(clearTimeout); timers = [];
+        [pkt, back].forEach(hide);
+        if (!document.hidden) { moon.classList.add('out'); later(400, cycle); }
+      });
+      moon.classList.add('out');
+      later(300, cycle);
+    })();
     document.querySelectorAll('.tab').forEach(function (tab) {
       tab.addEventListener('click', function () {
         document.querySelectorAll('.tab').forEach(function (t) { t.setAttribute('aria-selected', String(t === tab)); });
