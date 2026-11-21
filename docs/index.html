@@ -170,12 +170,38 @@
     footer { padding: 34px 0; border-top: 1px solid rgba(255,255,255,0.06); color: var(--muted); font-size: 14px; }
     footer .row { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 
+    /* Grid items default to min-width:auto, so one long <pre> line widens the whole column
+       past the viewport. Let them shrink; the <pre> scrolls on its own. */
+    .hero > *, .split > *, .grid > *, .stats > * { min-width: 0; }
+    p code, li code, td code { overflow-wrap: anywhere; }
+
     @media (max-width: 900px) {
       .hero, .split { grid-template-columns: 1fr; gap: 32px; }
       .g3, .g2 { grid-template-columns: 1fr; }
       .stats { grid-template-columns: repeat(2, 1fr); }
       .nav-links a:not(.keep) { display: none; }
       .hero { padding-top: 48px; }
+    }
+    @media (max-width: 640px) {
+      section { padding: 56px 0; }
+      pre { font-size: 12px; padding: 14px 16px; }
+      .stat .num { font-size: 26px; white-space: nowrap; }
+      table.compact { min-width: 0; }
+      table.compact th, table.compact td { padding: 10px 12px; }
+      /* threat table: one card per row, column names as labels */
+      table.stack { min-width: 0; }
+      table.stack thead { display: none; }
+      table.stack tr, table.stack td { display: block; }
+      table.stack tr { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+      table.stack tr:last-child { border-bottom: none; }
+      table.stack td { padding: 0; border: none; }
+      table.stack td + td { margin-top: 8px; }
+      table.stack td:nth-child(2)::before, table.stack td:nth-child(3)::before {
+        display: block; color: var(--muted); font-size: 11px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.8;
+      }
+      table.stack td:nth-child(2)::before { content: "Control"; }
+      table.stack td:nth-child(3)::before { content: "Tested by"; }
     }
   </style>
 </head>
@@ -418,7 +444,7 @@ ld_status st = <span class="f">ld_exec_start</span>(rt, src, len, <span class="s
           step, and the other feeds arbitrary source to the type checker.
         </p>
         <div class="table-wrap">
-          <table>
+          <table class="stack">
             <thead><tr><th>Threat</th><th>Control</th><th>Tested by</th></tr></thead>
             <tbody>
               <tr><td>Host access (files, processes, env, network)</td><td>None of it exists in the VM; dangerous globals are removed</td><td><code>sandbox_escape_globals_absent</code></td></tr>
@@ -469,7 +495,7 @@ ld_status st = <span class="f">ld_exec_start</span>(rt, src, len, <span class="s
           <div class="card stat"><div class="num">~2×</div><div class="lbl">faster per execution than the sandbox path RiteSmith ran before, on a Cortex-A53</div></div>
         </div>
         <div class="table-wrap">
-          <table>
+          <table class="compact">
             <thead><tr><th>Per execution, relative to lupa</th><th>x86_64</th><th>Cortex-A53 (Orange Pi Zero 3)</th></tr></thead>
             <tbody>
               <tr><td>Empty run</td><td class="good">0.43×</td><td class="good">0.96× (1.02 ms)</td></tr>
