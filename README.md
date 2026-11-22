@@ -299,8 +299,7 @@ docs/                       the website (GitHub Pages)
 
 ## Roadmap
 
-- **Process isolation.** The next step: run the VM in a child process with a memory limit, and
-  keep tools in the host, bridged by the step API. This grows into `lunardyson-server`.
+- **Observability in the Go binding:** the same observers as Python (Prometheus, OpenTelemetry).
 - **Async host helper:** an `execute_async` built on `start()`/`resume()`, for hosts that run
   many programs with slow tools at once.
 - **Only if profiling asks.** Each of these is microseconds against tool calls that take
