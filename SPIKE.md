@@ -73,3 +73,28 @@ includes the thread-pool hop), LunarDyson is ~2× faster per execution.
    the memory budget honest.
 5. Isolation tiers: a worker process pool and `lunardyson-server`.
 6. CI: wheels for x86_64 and aarch64, sanitizers, fuzzing.
+
+## Comparison with Monty (2026-11-22)
+
+[Monty](https://github.com/pydantic/monty) (pydantic-monty 1.6.0, MIT) is a Python-subset
+sandbox in Rust with the same idea: the model writes a small program, the host decides what
+it can reach, and execution pauses at every external call. Measured with the RiteSmith
+`luau_codegen` benchmark (python target added there) on a Cortex-A53:
+
+| | LunarDyson (Luau) | Monty (Python) |
+|---|---|---|
+| gpt-6.1-terra, 31 tasks × 3: pass@1 / final | 100% / 100% | 99% / 100% |
+| Empty run (median) | 0.92 ms | 1.71 ms |
+| 13 tool calls | 2.98 ms | 6.01 ms |
+| CPU: 200k loop iterations | 19 ms | 81 ms |
+| Runaway loop, 200 ms budget, inside try/pcall | stops at 219 ms | stops at 201 ms |
+| Isolation | in-process | subprocess worker (~10 MB RSS) |
+| Per-tool and per-effect budgets, sticky violations | yes | no (host's job) |
+
+Verdict: no change. The current generation model writes Luau as well as Python, so the
+main argument for Python is gone, and Monty costs ~2× per execution on the A53. Monty's
+subprocess workers are not an advantage here: running in the host process is a deliberate
+choice, because a Python host exposes its own metrics (memory, CPU, per-execution stats)
+far better than those of child processes, and the execution is tightly controlled
+(source only, budgeted allocator, VM-time watchdog, read-only builtins, sanitizers and
+fuzzing in CI), so the chance of a program taking the host down is close to nil. Revisit if a cheaper model regresses on Luau.
