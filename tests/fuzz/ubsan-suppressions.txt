@@ -3,3 +3,7 @@
 # known behaviour (luau-lang/luau#3100); we do not fork Luau. Scripts reach it through
 # luaL_checkinteger (string.sub/rep/char, table.insert, ...).
 float-cast-overflow:lapi.cpp
+# Same upstream behaviour in the builtin fast paths (VM/src/lbuiltins.cpp): luauF_char
+# does int(nvalue(arg)) before its range check, e.g. string.char(1e54). Found by the
+# nightly fuzz on 2026-11-22. Covered by SECURITY.md "out-of-range integer arguments".
+float-cast-overflow:lbuiltins.cpp

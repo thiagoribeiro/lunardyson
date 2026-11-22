@@ -10,11 +10,11 @@
     gtag('js', new Date());
     gtag('config', 'G-MLM73YT286');
   </script>
-  <title>LunarDyson — run untrusted Luau that orchestrates tools</title>
-  <meta name="description" content="LunarDyson runs untrusted, LLM-written Luau: default deny, type-checked against the host's tools, metered memory, time and tool calls. C, Python, Go.">
+  <title>LunarDyson — a sandbox for untrusted, LLM-written Luau</title>
+  <meta name="description" content="LunarDyson is a sandbox for untrusted, LLM-written Luau: default deny, type-checked against the host's tools, metered memory, time and tool calls. C, Python, Go.">
   <link rel="canonical" href="https://thiagoribeiro.github.io/lunardyson/">
-  <meta property="og:title" content="LunarDyson — run untrusted Luau that orchestrates tools">
-  <meta property="og:description" content="Run untrusted Luau programs that can only reach the world through the tools you register — and only within budget.">
+  <meta property="og:title" content="LunarDyson — a sandbox for untrusted, LLM-written Luau">
+  <meta property="og:description" content="A sandbox for untrusted Luau programs that can only reach the world through the tools you register — and only within budget.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://thiagoribeiro.github.io/lunardyson/">
   <meta property="og:site_name" content="LunarDyson">
@@ -23,7 +23,7 @@
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="LunarDyson: a moon inside a metered shell — default deny, typed tool calls, metered everything">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="LunarDyson — run untrusted Luau that orchestrates tools">
+  <meta name="twitter:title" content="LunarDyson — a sandbox for untrusted, LLM-written Luau">
   <meta name="twitter:description" content="Run untrusted Luau programs that can only reach the world through the tools you register — and only within budget.">
   <meta name="twitter:image" content="https://thiagoribeiro.github.io/lunardyson/assets/og-cover.png">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
@@ -237,7 +237,7 @@
   <main id="top">
     <div class="container hero">
       <div>
-        <span class="eyebrow">Execution runtime for untrusted Luau</span>
+        <span class="eyebrow">Sandbox runtime for untrusted Luau</span>
         <h1>Let the model write the program.<br><span class="dim">Decide what it can touch.</span></h1>
         <p class="lead">
           A host hands LunarDyson a small program, usually written by an LLM. It runs in a sandboxed
@@ -470,7 +470,6 @@ ld_status st = <span class="f">ld_exec_start</span>(rt, src, len, <span class="s
           <div class="card">
             <h3>What it does not promise</h3>
             <ul class="plain">
-              <li><strong>No process isolation yet.</strong> The runtime lives in the host process; a memory-safety bug in it or in Luau would take the host down. For hostile workloads, run it in a worker process or container. A worker pool and <code>lunardyson-server</code> are on the roadmap.</li>
               <li><strong>Tools are the host's job.</strong> LunarDyson counts and limits calls; what a tool does (SSRF checks, authorization, idempotency) is up to the host.</li>
               <li><strong>Timing side channels</strong> are out of scope.</li>
             </ul>
@@ -519,6 +518,32 @@ ld_status st = <span class="f">ld_exec_start</span>(rt, src, len, <span class="s
           write Luau that passes tests at the same rate as Lua, so the switch cost nothing in generation quality.
           <a href="https://github.com/thiagoribeiro/lunardyson/blob/main/SPIKE.md">Full spike report</a>.
         </p>
+
+        <h3 style="margin-top:40px;">Against Monty</h3>
+        <p class="note">
+          <a href="https://github.com/pydantic/monty">Monty</a> (pydantic-monty 1.6.0) is a sandbox for a Python
+          subset with the same idea: the model writes a small program and every external call pauses back to the host.
+          Measured in November 2026 with the same 31 generation tasks and the same tool stubs, on the same Cortex-A53.
+        </p>
+        <div class="table-wrap">
+          <table class="compact">
+            <thead><tr><th>Cortex-A53, median</th><th>LunarDyson (Luau)</th><th>Monty (Python)</th></tr></thead>
+            <tbody>
+              <tr><td>gpt-6.1-terra, 31 tasks × 3: pass first try / after repair</td><td class="good">100% / 100%</td><td>99% / 100%</td></tr>
+              <tr><td>Empty run</td><td class="good">0.92 ms</td><td class="warn">1.71 ms</td></tr>
+              <tr><td>13 tool calls</td><td class="good">2.98 ms</td><td class="warn">6.01 ms</td></tr>
+              <tr><td>CPU: 200k loop iterations</td><td class="good">19 ms</td><td class="warn">81 ms</td></tr>
+              <tr><td>Infinite loop, 200 ms budget, inside pcall / try</td><td>stops at 219 ms</td><td>stops at 201 ms</td></tr>
+              <tr><td>Per-tool and per-effect budgets, sticky violations</td><td class="good">built in</td><td>left to the host</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note" style="margin-top:12px;">
+          Today's models write Luau as reliably as Python, so the language choice costs nothing in generation, and
+          LunarDyson runs each execution in about half the time. Harness:
+          <a href="https://github.com/thiagoribeiro/ritesmith/tree/main/benchmarks/luau_codegen">ritesmith/benchmarks/luau_codegen</a>
+          (<code>--targets luau,python</code>, <code>monty_overhead.py</code>).
+        </p>
       </div>
     </section>
 
@@ -540,7 +565,7 @@ ld_status st = <span class="f">ld_exec_start</span>(rt, src, len, <span class="s
         <div class="card">
           <h3>Roadmap</h3>
           <ul class="plain">
-            <li><strong>Next:</strong> process isolation. The VM runs in a child process with a memory limit, and tools stay in the host, bridged by the step API. This grows into <code>lunardyson-server</code></li>
+            <li><strong>Next:</strong> observability in the bindings: Prometheus metrics and OpenTelemetry traces per execution and per tool call, straight from the host process</li>
             <li>An async host helper built on <code>start()</code>/<code>resume()</code></li>
             <li><strong>Only if profiling asks:</strong> a faster tool path, native codegen, a lighter GC policy</li>
             <li><strong>Done:</strong> CI on x86_64 and aarch64 with sanitizers, release wheels, continuous fuzzing</li>
