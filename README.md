@@ -127,6 +127,8 @@ array, and any other table becomes an object.
 | Python | [`bindings/python`](bindings/python) | `Runtime(memory_mb, cpu_time_ms, max_effects)`, `.tool()`, `.declare_types()`, `.check()`, `.execute()`, `.start()` |
 | Go | [`bindings/go`](bindings/go) | `NewRuntime(*Limits)`, `.Tool(name, fn, ToolOptions)`, `.DeclareTypes()`, `.Check()`, `.Execute()`, `.Start()` |
 
+Python: `pip install lunardyson` (Linux x86_64 and aarch64, glibc 2.28+, Python 3.10+).
+
 **Concurrency.** A runtime is not thread-safe and runs one execution at a time.
 - Give each thread its own runtime, or use a pool of runtimes.
 - The Python binding releases the GIL inside C calls, so a thread pool runs programs in

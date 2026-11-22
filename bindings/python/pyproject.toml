@@ -2,15 +2,34 @@
 name = "lunardyson"
 version = "0.1.3"
 description = "Execution runtime for untrusted Luau programs that orchestrate tools"
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "Thiago Ribeiro de Azeredo" }]
 requires-python = ">=3.10"
 dependencies = ["cffi>=1.16"]
+keywords = ["luau", "sandbox", "agents", "llm", "tools", "runtime"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Security",
+    "Topic :: Software Development :: Interpreters",
+]
+
+[project.urls]
+Homepage = "https://thiagoribeiro.github.io/lunardyson/"
+Repository = "https://github.com/thiagoribeiro/lunardyson"
+Issues = "https://github.com/thiagoribeiro/lunardyson/issues"
+Security = "https://github.com/thiagoribeiro/lunardyson/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
 prometheus = ["prometheus-client>=0.20"]
 otel = ["opentelemetry-api>=1.20"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

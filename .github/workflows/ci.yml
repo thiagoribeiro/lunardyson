@@ -5,6 +5,7 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:   # builds the wheels and publishes them to TestPyPI
 
 permissions:
   contents: read
@@ -79,21 +80,20 @@ jobs:
       - name: C smoke under ${{ matrix.name }}
         run: env ${{ matrix.env }} ./build/ld_smoke
 
+  # Wheels are built in the manylinux_2_28 image (glibc 2.28, AlmaLinux 8) and
+  # repaired by auditwheel, so they load on any newer glibc and PyPI accepts the
+  # platform tag. A tag push publishes to PyPI; a manual run publishes to TestPyPI.
   wheels:
     name: wheel (${{ matrix.arch }})
     needs: [test, sanitizers]
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     strategy:
       matrix:
         include:
-          # Ubuntu 22.04 (glibc 2.35, GCC 11) so the wheel loads on any newer
-          # glibc/libstdc++, e.g. the Debian-based python:3.12-slim images.
           - arch: x86_64
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
           - arch: aarch64
-            runner: ubuntu-22.04-arm
+            runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -102,26 +102,77 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install build tools
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
-          pip install cffi wheel
       - name: Check the tag matches the package versions
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           tag="${GITHUB_REF_NAME#v}"
           py=$(python -c "import tomllib;print(tomllib.load(open('bindings/python/pyproject.toml','rb'))['project']['version'])")
           cm=$(sed -n 's/^project(lunardyson VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           echo "tag=$tag python=$py cmake=$cm"
           test "$tag" = "$py" && test "$tag" = "$cm"
-      - name: Build
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLD_BUILD_TESTS=OFF && cmake --build build
-      - name: Wheel
-        run: ./scripts/build_wheel.sh build
-      - name: Smoke-test the wheel
+      - name: Build and repair the wheel (manylinux_2_28)
         run: |
-          python -m venv /tmp/w && /tmp/w/bin/pip install -q dist/*.whl
-          /tmp/w/bin/python -c "import lunardyson as ld; r = ld.Runtime(); print(ld.version(), r.execute('function run(i) return {ok=true} end').ok)"
+          docker run --rm -v "$PWD":/src -w /src quay.io/pypa/manylinux_2_28_${{ matrix.arch }} bash -euo pipefail -c '
+            export PATH=/opt/python/cp312-cp312/bin:$PATH
+            pip install -q --root-user-action=ignore cmake ninja cffi wheel auditwheel
+            cmake -S . -B /tmp/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLD_BUILD_TESTS=OFF
+            cmake --build /tmp/build
+            PYTHON=python ./scripts/build_wheel.sh /tmp/build
+            auditwheel repair -w wheelhouse dist/*.whl
+          '
+          sudo chown -R "$(id -u):$(id -g)" dist wheelhouse
+          ls -l wheelhouse
+      - name: Smoke-test the wheel (host Python 3.12, python:3.10-slim)
+        run: |
+          smoke='import lunardyson as ld; r = ld.Runtime(); print(ld.version(), r.execute("function run(i) return {ok=true} end").ok)'
+          python -m venv /tmp/w && /tmp/w/bin/pip install -q wheelhouse/*.whl
+          (cd /tmp && /tmp/w/bin/python -c "$smoke")
+          docker run --rm -v "$PWD/wheelhouse":/wh:ro python:3.10-slim \
+            sh -c "pip install -q --root-user-action=ignore /wh/*.whl && cd /tmp && python -c '$smoke'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.arch }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    needs: wheels
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: wheelhouse
+          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.whl
+          files: wheelhouse/*.whl
           generate_release_notes: true
+
+  # Trusted publishing (OIDC): PyPI and TestPyPI each have a publisher for this
+  # repo, workflow ci.yml and the environment named below. No token is stored.
+  publish:
+    name: publish (${{ github.event_name == 'push' && 'PyPI' || 'TestPyPI' }})
+    needs: wheels
+    runs-on: ubuntu-24.04
+    environment:
+      name: ${{ github.event_name == 'push' && 'pypi' || 'testpypi' }}
+      url: ${{ github.event_name == 'push' && 'https://pypi.org/p/lunardyson' || 'https://test.pypi.org/p/lunardyson' }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ github.event_name == 'push' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
+          # TestPyPI never accepts the same version twice; re-running a test
+          # upload of an unchanged version should not fail the workflow.
+          skip-existing: ${{ github.event_name != 'push' }}
