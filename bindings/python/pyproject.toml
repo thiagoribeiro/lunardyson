@@ -5,6 +5,10 @@ description = "Execution runtime for untrusted Luau programs that orchestrate to
 requires-python = ">=3.10"
 dependencies = ["cffi>=1.16"]
 
+[project.optional-dependencies]
+prometheus = ["prometheus-client>=0.20"]
+otel = ["opentelemetry-api>=1.20"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

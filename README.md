@@ -134,6 +134,36 @@ array, and any other table becomes an object.
 - From asyncio, run `execute` in an executor. Alternatively, drive `start()`/`resume()`
   yourself and `await` the tools.
 
+## Observability
+
+LunarDyson runs in the host process, so everything an execution does can be measured there.
+The Python binding takes observers that hear about every execution and every tool call,
+through the step API. That covers `execute()` and hosts that drive `start()`/`resume()`
+themselves.
+
+```python
+from lunardyson.observe import OTelObserver, PrometheusObserver
+
+rt = ld.Runtime(observer=[PrometheusObserver(), OTelObserver()], label="scripts")
+```
+
+- **Prometheus** (`pip install lunardyson[prometheus]`):
+  - `lunardyson_executions_total{runtime,outcome,error_kind}`;
+  - histograms of wall time, VM time and peak memory per execution;
+  - `lunardyson_tool_calls_total{runtime,tool,effect,ok}` and the host's tool latency;
+  - `lunardyson_budget_violations_total{runtime,kind}`.
+  - The labels never include call ids, so cardinality stays bounded.
+- **OpenTelemetry** (`pip install lunardyson[otel]`, API only):
+  - a `lunardyson.execute` span per execution, carrying the outcome and the stats;
+  - a child span per tool call, carrying the call id, the effect and whether the call succeeded.
+- **Your own:** any object with `on_start`, `on_tool_call` and `on_finish`. See
+  [`observe.py`](bindings/python/lunardyson/observe.py).
+- Without an observer the binding pays nothing.
+- An observer that raises never fails an execution.
+- An execution closed before its result was read still reports, as `abandoned`.
+- Cost per execution with two tool calls, on x86_64: about 11 µs with Prometheus and about
+  32 µs with the OpenTelemetry SDK.
+
 ## Security model
 
 Every control has a conformance case. The same attack and contract suite
@@ -269,8 +299,7 @@ docs/                       the website (GitHub Pages)
 
 ## Roadmap
 
-- **Process isolation.** The next step: run the VM in a child process with a memory limit, and
-  keep tools in the host, bridged by the step API. This grows into `lunardyson-server`.
+- **Observability in the Go binding:** the same observers as Python (Prometheus, OpenTelemetry).
 - **Async host helper:** an `execute_async` built on `start()`/`resume()`, for hosts that run
   many programs with slow tools at once.
 - **Only if profiling asks.** Each of these is microseconds against tool calls that take
@@ -280,6 +309,7 @@ docs/                       the website (GitHub Pages)
   - a GC policy that skips the full collection per execution.
 
 **Done:**
+- Prometheus metrics and OpenTelemetry traces in the Python binding.
 - CI on x86_64 and aarch64, with sanitizers.
 - Release wheels for both architectures.
 - Continuous fuzzing.
