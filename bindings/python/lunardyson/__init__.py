@@ -12,6 +12,7 @@ A Runtime is not thread-safe; use one per thread (or a pool).
 """
 
 import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -79,6 +80,12 @@ class Execution:
         self._ptr = ptr
         self._status = status
         self._call = ffi.new("ld_call*")  # reused for every pending() query
+        self._obs = runtime._observer
+        if self._obs is not None:
+            self._t0 = time.perf_counter()
+            self._obs_state = self._obs.on_start(runtime.label)
+            self._pending: tuple[Call, float] | None = None
+            self._finished = False
 
     @property
     def status(self) -> str:
@@ -89,18 +96,36 @@ class Execution:
         if not lib.ld_exec_pending(self._ptr, call):
             return None
         args = _loads(ffi.unpack(call.args_json, call.args_len))
-        return Call(call.call_id, self._runtime._tool_name(call.tool), args, _EFFECT_NAMES[call.effect])
+        out = Call(call.call_id, self._runtime._tool_name(call.tool), args, _EFFECT_NAMES[call.effect])
+        if self._obs is not None and (self._pending is None or self._pending[0].call_id != out.call_id):
+            self._pending = (out, time.perf_counter())
+        return out
+
+    def _observe_resume(self, ok: bool) -> None:
+        if self._obs is not None and self._pending is not None:
+            call, t = self._pending
+            self._pending = None
+            self._obs.on_tool_call(self._obs_state, self._runtime.label, call, time.perf_counter() - t, ok)
 
     def resume(self, result: Any) -> str:
         payload = _dumps(result).encode()
         self._status = lib.ld_exec_resume(self._ptr, payload, len(payload))
+        self._observe_resume(True)
         return self.status
 
     def resume_error(self, message: str) -> str:
         self._status = lib.ld_exec_resume_error(self._ptr, message.encode())
+        self._observe_resume(False)
         return self.status
 
     def result(self) -> Result:
+        res = self._result()
+        if self._obs is not None and not self._finished and self._status != 1:
+            self._finished = True
+            self._obs.on_finish(self._obs_state, self._runtime.label, res, time.perf_counter() - self._t0)
+        return res
+
+    def _result(self) -> Result:
         raw = lib.ld_exec_stats(self._ptr)
         stats = Stats(int(raw.vm_time_us), int(raw.peak_memory_bytes), int(raw.tool_calls))
         if self._status == 0:
@@ -114,8 +139,21 @@ class Execution:
 
     def close(self) -> None:
         if self._ptr is not None:
+            if self._obs is not None and not self._finished:
+                self._finish_unread()
             lib.ld_exec_free(self._ptr)
             self._ptr = None
+
+    def _finish_unread(self) -> None:
+        """Closed before result() was read: still report it, so spans end and counts add up."""
+        self._finished = True
+        if self._status == 1:  # abandoned while a tool call was pending
+            raw = lib.ld_exec_stats(self._ptr)
+            stats = Stats(int(raw.vm_time_us), int(raw.peak_memory_bytes), int(raw.tool_calls))
+            res = Result(False, None, "abandoned", "closed while a tool call was pending", stats)
+        else:
+            res = self._result()
+        self._obs.on_finish(self._obs_state, self._runtime.label, res, time.perf_counter() - self._t0)
 
     def __enter__(self) -> "Execution":
         return self
@@ -133,7 +171,12 @@ class Runtime:
         memory_mb: float = 16,
         cpu_time_ms: int = 1000,
         max_effects: dict[str, int] | None = None,
+        *,
+        observer: Any = None,
+        label: str = "default",
     ):
+        """``observer``: one or a list of ``lunardyson.observe`` observers (Prometheus,
+        OpenTelemetry or your own); ``label`` names this runtime in metrics and spans."""
         limits = ffi.new("ld_limits*", lib.ld_limits_default())
         limits.memory_limit_bytes = int(memory_mb * 1024 * 1024)
         limits.cpu_time_ms = cpu_time_ms
@@ -142,6 +185,10 @@ class Runtime:
         self._ptr = lib.ld_runtime_new(limits)
         if self._ptr == ffi.NULL:
             raise LunarDysonError("could not create runtime")
+        from lunardyson.observe import combine
+
+        self._observer = combine(observer)
+        self.label = label
         self._tools: dict[str, Callable[[Any], Any] | None] = {}
         self._names: dict[int, str] = {}  # tool-name pointer -> str (pointers are stable once sealed)
 
